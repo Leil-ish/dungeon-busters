@@ -291,7 +291,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.updateAlliedFollowers()
     this.updateAllySupportFire()
 
-    if (!this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
+    if (this.bossFightStarted && !this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
       this.miniBossDefeated = true
       this.statusMessage = 'Infix defeated. Vault release open.'
       this.updateUiText()
@@ -548,6 +548,8 @@ export class LavaBogScene extends Phaser.Scene {
       return
     }
     this.bossFightStarted = true
+    this.miniBossDefeated = false
+    this.miniBossHealth = Math.max(1, this.miniBossHealth)
     this.miniBoss.enableBody(true, 2860, 470, true, true)
     this.miniBossLabel.setVisible(true)
     this.startDialogue(
