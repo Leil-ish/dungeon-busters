@@ -221,7 +221,9 @@ class Stage1 extends Phaser.Scene {
       this.createSlipperyZone(520, worldHeight - 170, 260, 180),
       this.createSlipperyZone(1080, worldHeight - 170, 320, 180),
       this.createSlipperyZone(1990, 640, 360, 240),
+      this.createSlipperyZone(1490, 840, 700, 100),
     ]
+    this.createBottomSpikes()
 
     this.keyPiece = this.add.rectangle(2310, 300, 26, 26, 0xffd84f)
     this.physics.add.existing(this.keyPiece, true)
@@ -315,6 +317,9 @@ class Stage1 extends Phaser.Scene {
     if (this.cursors.up.isDown && body.blocked.down) {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
+    if (body.blocked.down && this.player.y > this.LEVEL_H - 36 && !this.cutsceneActive) {
+      this.applyDamage(1, 'You fell between the blocks!', true)
+    }
 
     if (this.physics.overlap(this.player, this.exitDoor)) {
       if (this.playerHasKey && !this.stageClearTriggered) {
@@ -397,6 +402,17 @@ class Stage1 extends Phaser.Scene {
     })
   }
 
+  private createBottomSpikes(): void {
+    const spikeXs = [1760, 1810, 1860, 1910, 1960]
+    spikeXs.forEach((x) => {
+      const spike = this.add.rectangle(x, 846, 34, 30, 0xd84949, 0.95)
+      this.physics.add.existing(spike, true)
+      this.physics.add.overlap(this.player, spike, () => {
+        this.applyDamage(1, 'Spikes! Careful on the lower lane.', true)
+      })
+    })
+  }
+
   private activateCheckpoint(flag: Phaser.GameObjects.Rectangle, x: number, y: number): void {
     if (flag.getData('active')) {
       return
@@ -434,7 +450,7 @@ class Stage1 extends Phaser.Scene {
     this.applyDamage(1, 'Oof! Try again.')
   }
 
-  private applyDamage(amount: number, message: string): void {
+  private applyDamage(amount: number, message: string, forceRespawn = false): void {
     if (this.isPlayerInvulnerable) {
       return
     }
@@ -446,7 +462,7 @@ class Stage1 extends Phaser.Scene {
     this.updateUiText()
     this.playTone(220, 0.09)
 
-    if (this.playerHealth <= 0) {
+    if (forceRespawn || this.playerHealth <= 0) {
       this.playerHealth = this.playerMaxHealth
       this.player.setPosition(this.checkpointX, this.checkpointY)
       this.player.setVelocity(0, 0)
