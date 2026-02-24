@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import type { StageId } from './heroes'
-import { gameProgress } from './progress'
+import { gameProgress, saveGameProgress } from './progress'
 
 export class StageSelectScene extends Phaser.Scene {
   private selectText!: Phaser.GameObjects.Text
@@ -98,6 +98,7 @@ export class StageSelectScene extends Phaser.Scene {
   private queueHeroSelect(stageId: StageId, sceneKey: string): void {
     gameProgress.pendingStageId = stageId
     gameProgress.pendingStageSceneKey = sceneKey
+    saveGameProgress()
     this.scene.start('hero-select')
   }
 

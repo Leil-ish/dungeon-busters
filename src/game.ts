@@ -8,7 +8,7 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress } from './progress'
+import { gameProgress, saveGameProgress } from './progress'
 import { RockyCavernsScene } from './rocky-caverns'
 import { preloadSpriteAssets } from './sprite-assets'
 import { StageSelectScene } from './stage-select'
@@ -239,6 +239,7 @@ class Stage1 extends Phaser.Scene {
 
       this.playerHasKey = true
       gameProgress.torrentKeyPiece = true
+      saveGameProgress()
       this.keyPiece.destroy()
       this.keyPiece = null
       this.statusMessage = 'Torrent Key Piece collected.'

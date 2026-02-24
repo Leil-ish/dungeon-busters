@@ -6,7 +6,7 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress } from './progress'
+import { gameProgress, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 
 type RockSpawnPoint = {
@@ -203,6 +203,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     if (this.rescueDone && this.physics.overlap(this.player, this.exitDoor) && !this.stageClearTriggered) {
       this.stageClearTriggered = true
       gameProgress.cavernMapPiece = true
+      saveGameProgress()
       this.statusMessage = 'STAGE CLEAR! Returning to stage select...'
       this.updateUiText()
       this.time.delayedCall(1200, () => this.scene.start('stage-select'))
@@ -560,6 +561,7 @@ export class RockyCavernsScene extends Phaser.Scene {
 
       this.rescueDone = true
       gameProgress.volcanoManRescued = true
+      saveGameProgress()
       this.statusMessage = 'Volcano Man rescued.'
       this.exitDoor.setAlpha(1)
       this.updateUiText()

@@ -11,7 +11,9 @@ export type GameProgress = {
   pendingStageSceneKey: string | null
 }
 
-export const gameProgress: GameProgress = {
+const STORAGE_KEY = 'dungeon_busters_progress_v1'
+
+const defaultProgress: GameProgress = {
   torrentKeyPiece: false,
   volcanoManRescued: false,
   cavernMapPiece: false,
@@ -20,4 +22,32 @@ export const gameProgress: GameProgress = {
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
+}
+
+const loadGameProgress = (): GameProgress => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      return { ...defaultProgress }
+    }
+    const parsed = JSON.parse(raw) as Partial<GameProgress>
+    return {
+      ...defaultProgress,
+      ...parsed,
+      pendingStageId: null,
+      pendingStageSceneKey: null,
+    }
+  } catch {
+    return { ...defaultProgress }
+  }
+}
+
+export const gameProgress: GameProgress = loadGameProgress()
+
+export const saveGameProgress = (): void => {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(gameProgress))
+  } catch {
+    // no-op for restricted storage environments
+  }
 }

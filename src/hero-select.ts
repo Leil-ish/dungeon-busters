@@ -8,7 +8,8 @@ import {
   type RuntimePlayerStats,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress } from './progress'
+import { gameProgress, saveGameProgress } from './progress'
+import { preloadSpriteAssets } from './sprite-assets'
 
 const BASE_STATS: RuntimePlayerStats = {
   moveAcceleration: 900,
@@ -27,9 +28,14 @@ export class HeroSelectScene extends Phaser.Scene {
   private listText!: Phaser.GameObjects.Text
   private detailText!: Phaser.GameObjects.Text
   private iconRect!: Phaser.GameObjects.Rectangle
+  private iconSprite!: Phaser.GameObjects.Image
 
   constructor() {
     super('hero-select')
+  }
+
+  preload(): void {
+    preloadSpriteAssets(this)
   }
 
   create(): void {
@@ -71,6 +77,8 @@ export class HeroSelectScene extends Phaser.Scene {
     })
 
     this.iconRect = this.add.rectangle(590, 204, 96, 96, 0xffffff, 1)
+    this.iconSprite = this.add.image(590, 204, '__WHITE')
+    this.iconSprite.setVisible(false)
 
     this.detailText = this.add.text(500, 280, '', {
       color: '#f2f6ff',
@@ -122,7 +130,20 @@ export class HeroSelectScene extends Phaser.Scene {
     const effective = computeEffectivePlayerStats(selectedHero.id, stageId, BASE_STATS)
     const affinity = selectedHero.affinity[stageId]
 
-    this.iconRect.setFillStyle(this.heroColor(selectedHero.id), 1)
+    const hasSprite = this.textures.exists(selectedHero.textureKey)
+    this.iconRect.setVisible(!hasSprite)
+    if (!hasSprite) {
+      this.iconRect.setFillStyle(this.heroColor(selectedHero.id), 1)
+      this.iconSprite.setVisible(false)
+    } else {
+      this.iconSprite.setVisible(true)
+      this.iconSprite.setTexture(selectedHero.textureKey)
+      const tex = this.textures.get(selectedHero.textureKey).getSourceImage() as { width?: number; height?: number }
+      const width = tex.width ?? 1
+      const height = tex.height ?? 1
+      const scale = Math.min(96 / width, 96 / height)
+      this.iconSprite.setScale(scale)
+    }
 
     this.detailText.setText(
       [
@@ -151,6 +172,7 @@ export class HeroSelectScene extends Phaser.Scene {
     gameProgress.selectedHeroId = heroId
     gameProgress.pendingStageId = null
     gameProgress.pendingStageSceneKey = null
+    saveGameProgress()
     this.scene.start(stageSceneKey)
   }
 

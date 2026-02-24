@@ -6,7 +6,7 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress } from './progress'
+import { gameProgress, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 
 type BloodCloud = {
@@ -209,6 +209,7 @@ export class BloodyHillsScene extends Phaser.Scene {
     if (this.rescueDone && this.physics.overlap(this.player, this.exitDoor) && !this.stageClearTriggered) {
       this.stageClearTriggered = true
       gameProgress.bloodyMapPiece = true
+      saveGameProgress()
       this.statusMessage = 'STAGE CLEAR! Returning to stage select...'
       this.updateUiText()
       this.time.delayedCall(1200, () => this.scene.start('stage-select'))
@@ -594,6 +595,7 @@ export class BloodyHillsScene extends Phaser.Scene {
 
       this.rescueDone = true
       gameProgress.icemeckelRescued = true
+      saveGameProgress()
       this.exitDoor.setAlpha(1)
       this.statusMessage = 'Icemeckel rescued. Reach the exit.'
       this.updateUiText()
