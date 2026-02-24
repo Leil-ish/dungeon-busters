@@ -4,13 +4,13 @@ const SPRITE_MANIFEST: Array<[string, string]> = [
   ['hero-bouldereye', 'sprites/Bouldereye.png'],
   ['hero-micralis', 'sprites/Micralis.png'],
   ['hero-electroman', 'sprites/Electroman.png'],
-  ['hero-glowman', 'sprites/inspector-glowman.png'],
+  ['hero-glowman', 'sprites/Inspector Glowman.png'],
   ['hero-icemeckel', 'sprites/Icemeckel.png'],
-  ['hero-volcano-man', 'sprites/volcano-man.png'],
-  ['hero-swirl-exanimo', 'sprites/swirl-exanimo.png'],
+  ['hero-volcano-man', 'sprites/Volcano%20Man.png'],
+  ['hero-swirl-exanimo', 'sprites/Swirl Exanimo.png'],
   ['hero-illislim', 'sprites/Illislim.png'],
-  ['hero-hurricano-man', 'sprites/hurricano-man.png'],
-  ['enemy-scout', 'sprites/Bouldereye.png'],
+  ['hero-hurricano-man', 'sprites/Hurricano Man.png'],
+  ['enemy-scout', 'sprites/Monster%201.png'],
 ]
 
 export const preloadSpriteAssets = (scene: Phaser.Scene): void => {
