@@ -1,4 +1,11 @@
 import Phaser from 'phaser'
+import {
+  DEFAULT_HERO_ID,
+  HEROES,
+  type HeroDefinition,
+  type HeroId,
+  computeEffectivePlayerStats,
+} from './heroes'
 import { gameProgress } from './progress'
 
 type RockSpawnPoint = {
@@ -42,6 +49,17 @@ export class RockyCavernsScene extends Phaser.Scene {
   private cutsceneActive = true
   private inRescueSequence = false
   private spaceKey!: Phaser.Input.Keyboard.Key
+  private abilityKey!: Phaser.Input.Keyboard.Key
+  private selectedHero!: HeroDefinition
+  private effectiveStats = computeEffectivePlayerStats(DEFAULT_HERO_ID, 'ROCKY_CAVERNS', {
+    moveAcceleration: 900,
+    maxVelocityX: 260,
+    jumpVelocity: 520,
+    shotCooldownMs: 220,
+    shotSpeed: 520,
+    damage: 1,
+    defense: 1,
+  })
 
   private readonly moveAcceleration = 900
   private readonly normalDragX = 900
@@ -56,13 +74,14 @@ export class RockyCavernsScene extends Phaser.Scene {
   private readonly enemy2PatrolMinX = 1890
   private readonly enemy2PatrolMaxX = 2130
   private readonly enemyPatrolSpeed = 80
+  private readonly abilityCooldownMs = 1300
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
+  private lastAbilityAt = 0
 
   private statusMessage = 'Reach the stalactite chamber.'
   private readonly stageName = 'Stage 2: Rocky Caverns'
-  private readonly heroName = 'Electroman'
   private rescueDone = false
   private stageClearTriggered = false
   private nextRockTimer?: Phaser.Time.TimerEvent
@@ -75,6 +94,17 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, this.LEVEL_W, this.LEVEL_H)
     this.cameras.main.setBounds(0, 0, this.LEVEL_W, this.LEVEL_H)
     this.cameras.main.setBackgroundColor('#0c0d12')
+    const selectedHeroId = (gameProgress.selectedHeroId ?? DEFAULT_HERO_ID) as HeroId
+    this.selectedHero = HEROES[selectedHeroId] ?? HEROES[DEFAULT_HERO_ID]
+    this.effectiveStats = computeEffectivePlayerStats(this.selectedHero.id, 'ROCKY_CAVERNS', {
+      moveAcceleration: this.moveAcceleration,
+      maxVelocityX: this.normalMaxVelocityX,
+      jumpVelocity: 520,
+      shotCooldownMs: this.shotCooldownMs,
+      shotSpeed: this.shotSpeed,
+      damage: 1,
+      defense: 1,
+    })
 
     this.createTextures()
 
@@ -84,11 +114,12 @@ export class RockyCavernsScene extends Phaser.Scene {
 
     this.buildLevelGeometry()
 
-    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, 'player-block')
+    const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
+    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
-    this.player.setMaxVelocity(this.normalMaxVelocityX, 900)
+    this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
     this.physics.add.collider(this.player, this.staticPlatforms)
 
     this.createEnemiesAndWeaponSystem()
@@ -97,6 +128,7 @@ export class RockyCavernsScene extends Phaser.Scene {
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+    this.abilityKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X)
 
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15)
 
@@ -127,10 +159,10 @@ export class RockyCavernsScene extends Phaser.Scene {
     }
 
     if (this.cursors.left.isDown) {
-      this.player.setAccelerationX(-this.moveAcceleration)
+      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration)
       this.facingDir = -1
     } else if (this.cursors.right.isDown) {
-      this.player.setAccelerationX(this.moveAcceleration)
+      this.player.setAccelerationX(this.effectiveStats.moveAcceleration)
       this.facingDir = 1
     } else {
       this.player.setAccelerationX(0)
@@ -139,10 +171,13 @@ export class RockyCavernsScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
       this.fireShot()
     }
+    if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
+      this.tryUseHeroAbility()
+    }
 
     const body = this.player.body as Phaser.Physics.Arcade.Body
     if (this.cursors.up.isDown && body.blocked.down) {
-      this.player.setVelocityY(-520)
+      this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
 
     if (!this.rescueDone && this.physics.overlap(this.player, this.rescueTrigger)) {
@@ -210,6 +245,15 @@ export class RockyCavernsScene extends Phaser.Scene {
       gfx.fillStyle(0x7bf4ff, 1)
       gfx.fillRect(0, 0, 16, 8)
       gfx.generateTexture('electro-shot', 16, 8)
+      gfx.clear()
+    }
+
+    if (!this.textures.exists('hurricano-man')) {
+      gfx.fillStyle(0x7bd8ff, 1)
+      gfx.fillRect(0, 0, 20, 60)
+      gfx.fillStyle(0xffffff, 0.9)
+      gfx.fillRect(7, 0, 6, 60)
+      gfx.generateTexture('hurricano-man', 20, 60)
     }
 
     gfx.destroy()
@@ -461,7 +505,8 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.statusMessage = 'Rock hit! Watch the ceiling.'
     this.updateUiText()
 
-    this.time.delayedCall(this.hitInvulnerabilityMs, () => {
+    const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
+    this.time.delayedCall(this.hitInvulnerabilityMs * defenseScale, () => {
       this.isPlayerInvulnerable = false
       this.player.clearTint()
     })
@@ -480,7 +525,8 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.statusMessage = 'Enemy hit! Try again.'
     this.updateUiText()
 
-    this.time.delayedCall(this.hitInvulnerabilityMs, () => {
+    const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
+    this.time.delayedCall(this.hitInvulnerabilityMs * defenseScale, () => {
       this.isPlayerInvulnerable = false
       this.player.clearTint()
     })
@@ -488,7 +534,7 @@ export class RockyCavernsScene extends Phaser.Scene {
 
   private fireShot(): void {
     const now = this.time.now
-    if (now - this.lastShotAt < this.shotCooldownMs) {
+    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs) {
       return
     }
 
@@ -503,7 +549,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     shot.setActive(true)
     shot.setVisible(true)
     shot.enableBody(true, shot.x, shot.y, true, true)
-    shot.setVelocityX(this.facingDir * this.shotSpeed)
+    shot.setVelocityX(this.facingDir * this.effectiveStats.shotSpeed)
     this.time.delayedCall(900, () => shot.disableBody(true, true))
   }
 
@@ -515,6 +561,37 @@ export class RockyCavernsScene extends Phaser.Scene {
     shot.disableBody(true, true)
     enemy.disableBody(true, true)
     this.statusMessage = 'Enemy down!'
+    this.updateUiText()
+  }
+
+  private tryUseHeroAbility(): void {
+    if (this.selectedHero.specialAbility !== 'GUST_DASH') {
+      this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
+      this.updateUiText()
+      return
+    }
+
+    const now = this.time.now
+    if (now - this.lastAbilityAt < this.abilityCooldownMs) {
+      return
+    }
+
+    this.lastAbilityAt = now
+    this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
+    const enemies = [this.enemy1, this.enemy2]
+    for (const enemy of enemies) {
+      if (!enemy.active) {
+        continue
+      }
+
+      const dx = enemy.x - this.player.x
+      const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+      if (inFront && Math.abs(dx) < 180) {
+        enemy.setVelocityX(this.facingDir * 180)
+      }
+    }
+
+    this.statusMessage = 'Gust Dash!'
     this.updateUiText()
   }
 
@@ -598,7 +675,7 @@ export class RockyCavernsScene extends Phaser.Scene {
       [
         'Dungeon Busters',
         this.stageName,
-        `Hero: ${this.heroName}`,
+        `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `Volcano Man: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
         this.statusMessage,

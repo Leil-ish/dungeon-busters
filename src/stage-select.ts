@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import type { StageId } from './heroes'
 import { gameProgress } from './progress'
 
 export class StageSelectScene extends Phaser.Scene {
@@ -41,9 +42,9 @@ export class StageSelectScene extends Phaser.Scene {
       fontSize: '20px',
     })
 
-    this.input.keyboard?.on('keydown-ONE', () => this.scene.start('stage1'))
-    this.input.keyboard?.on('keydown-TWO', () => this.scene.start('rocky-caverns'))
-    this.input.keyboard?.on('keydown-THREE', () => this.scene.start('bloody-hills'))
+    this.input.keyboard?.on('keydown-ONE', () => this.queueHeroSelect('SLIPPERY_HILLS', 'stage1'))
+    this.input.keyboard?.on('keydown-TWO', () => this.queueHeroSelect('ROCKY_CAVERNS', 'rocky-caverns'))
+    this.input.keyboard?.on('keydown-THREE', () => this.queueHeroSelect('BLOODY_HILLS', 'bloody-hills'))
 
     this.refreshProgressText()
   }
@@ -58,5 +59,11 @@ export class StageSelectScene extends Phaser.Scene {
         `   Bloody Map Piece: ${gameProgress.bloodyMapPiece ? 'Collected' : 'Missing'}`,
       ].join('\n'),
     )
+  }
+
+  private queueHeroSelect(stageId: StageId, sceneKey: string): void {
+    gameProgress.pendingStageId = stageId
+    gameProgress.pendingStageSceneKey = sceneKey
+    this.scene.start('hero-select')
   }
 }

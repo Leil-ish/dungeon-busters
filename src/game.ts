@@ -1,8 +1,16 @@
 import Phaser from 'phaser'
 import { BloodyHillsScene } from './bloody-hills'
+import {
+  DEFAULT_HERO_ID,
+  HEROES,
+  type HeroDefinition,
+  type HeroId,
+  computeEffectivePlayerStats,
+} from './heroes'
 import { gameProgress } from './progress'
 import { RockyCavernsScene } from './rocky-caverns'
 import { StageSelectScene } from './stage-select'
+import { HeroSelectScene } from './hero-select'
 
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
@@ -24,10 +32,22 @@ class Stage1 extends Phaser.Scene {
   private cutsceneLineIndex = 0
   private cutsceneActive = true
   private spaceKey!: Phaser.Input.Keyboard.Key
+  private abilityKey!: Phaser.Input.Keyboard.Key
+  private selectedHero!: HeroDefinition
+  private effectiveStats = computeEffectivePlayerStats(DEFAULT_HERO_ID, 'SLIPPERY_HILLS', {
+    moveAcceleration: 900,
+    maxVelocityX: 260,
+    jumpVelocity: 520,
+    shotCooldownMs: 220,
+    shotSpeed: 520,
+    damage: 1,
+    defense: 1,
+  })
+  private readonly abilityCooldownMs = 1300
+  private lastAbilityAt = 0
   private playerHasKey = false
   private stageClearTriggered = false
   private statusMessage = 'Find the Torrent Key Piece.'
-  private readonly heroName = 'Electroman'
   private readonly stageName = 'Stage 1: Slippery Hills'
 
   private readonly normalDragX = 900
@@ -57,6 +77,17 @@ class Stage1 extends Phaser.Scene {
   create(): void {
     const worldWidth = this.LEVEL_W
     const worldHeight = this.LEVEL_H
+    const selectedHeroId = (gameProgress.selectedHeroId ?? DEFAULT_HERO_ID) as HeroId
+    this.selectedHero = HEROES[selectedHeroId] ?? HEROES[DEFAULT_HERO_ID]
+    this.effectiveStats = computeEffectivePlayerStats(this.selectedHero.id, 'SLIPPERY_HILLS', {
+      moveAcceleration: this.moveAcceleration,
+      maxVelocityX: this.normalMaxVelocityX,
+      jumpVelocity: 520,
+      shotCooldownMs: this.shotCooldownMs,
+      shotSpeed: this.shotSpeed,
+      damage: 1,
+      defense: 1,
+    })
 
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight)
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight)
@@ -94,6 +125,12 @@ class Stage1 extends Phaser.Scene {
     gfx.fillRect(0, 0, 16, 8)
     gfx.generateTexture('electro-shot', 16, 8)
     gfx.clear()
+    gfx.fillStyle(0x7bd8ff, 1)
+    gfx.fillRect(0, 0, 20, 60)
+    gfx.fillStyle(0xffffff, 0.9)
+    gfx.fillRect(7, 0, 6, 60)
+    gfx.generateTexture('hurricano-man', 20, 60)
+    gfx.clear()
     gfx.fillStyle(0x12293d, 1)
     gfx.fillRect(0, 0, 64, 64)
     gfx.fillStyle(0x78d3ff, 0.2)
@@ -108,11 +145,12 @@ class Stage1 extends Phaser.Scene {
     this.waterfallBackdrop.setScrollFactor(0)
     this.waterfallBackdrop.setDepth(-20)
 
-    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, 'player-block')
+    const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
+    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
-    this.player.setMaxVelocity(this.normalMaxVelocityX, 900)
+    this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
 
     this.physics.add.collider(this.player, this.staticPlatforms)
 
@@ -174,6 +212,7 @@ class Stage1 extends Phaser.Scene {
     })
 
     this.cursors = this.input.keyboard!.createCursorKeys()
+    this.abilityKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X)
 
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15)
 
@@ -212,17 +251,17 @@ class Stage1 extends Phaser.Scene {
 
     if (isInSlipperyZone) {
       this.player.setDragX(this.slipperyDragX)
-      this.player.setMaxVelocity(this.slipperyMaxVelocityX, 900)
+      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX * (this.slipperyMaxVelocityX / this.normalMaxVelocityX), 900)
     } else {
       this.player.setDragX(this.normalDragX)
-      this.player.setMaxVelocity(this.normalMaxVelocityX, 900)
+      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
     }
 
     if (this.cursors.left.isDown) {
-      this.player.setAccelerationX(-this.moveAcceleration)
+      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration)
       this.facingDir = -1
     } else if (this.cursors.right.isDown) {
-      this.player.setAccelerationX(this.moveAcceleration)
+      this.player.setAccelerationX(this.effectiveStats.moveAcceleration)
       this.facingDir = 1
     } else {
       this.player.setAccelerationX(0)
@@ -232,9 +271,13 @@ class Stage1 extends Phaser.Scene {
       this.fireShot()
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
+      this.tryUseHeroAbility()
+    }
+
     const body = this.player.body as Phaser.Physics.Arcade.Body
     if (this.cursors.up.isDown && body.blocked.down) {
-      this.player.setVelocityY(-520)
+      this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
 
     if (this.physics.overlap(this.player, this.exitDoor)) {
@@ -307,7 +350,9 @@ class Stage1 extends Phaser.Scene {
     this.statusMessage = 'Oof! Try again.'
     this.updateUiText()
 
-    this.time.delayedCall(this.hitInvulnerabilityMs, () => {
+    const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
+    const invulnMs = this.hitInvulnerabilityMs * defenseScale
+    this.time.delayedCall(invulnMs, () => {
       this.isPlayerInvulnerable = false
       this.player.clearTint()
     })
@@ -315,7 +360,7 @@ class Stage1 extends Phaser.Scene {
 
   private fireShot(): void {
     const now = this.time.now
-    if (now - this.lastShotAt < this.shotCooldownMs) {
+    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs) {
       return
     }
 
@@ -330,7 +375,7 @@ class Stage1 extends Phaser.Scene {
     shot.setActive(true)
     shot.setVisible(true)
     shot.enableBody(true, shot.x, shot.y, true, true)
-    shot.setVelocityX(this.facingDir * this.shotSpeed)
+    shot.setVelocityX(this.facingDir * this.effectiveStats.shotSpeed)
     this.time.delayedCall(900, () => shot.disableBody(true, true))
   }
 
@@ -345,6 +390,41 @@ class Stage1 extends Phaser.Scene {
     shot.disableBody(true, true)
     enemy.disableBody(true, true)
     this.statusMessage = 'Enemy down!'
+    this.updateUiText()
+  }
+
+  private get heroName(): string {
+    return this.selectedHero?.displayName ?? 'Micralis'
+  }
+
+  private tryUseHeroAbility(): void {
+    if (this.selectedHero.specialAbility !== 'GUST_DASH') {
+      this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
+      this.updateUiText()
+      return
+    }
+
+    const now = this.time.now
+    if (now - this.lastAbilityAt < this.abilityCooldownMs) {
+      return
+    }
+
+    this.lastAbilityAt = now
+    this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
+    const enemies = [this.enemy, this.enemy2]
+    for (const enemy of enemies) {
+      if (!enemy.active) {
+        continue
+      }
+
+      const dx = enemy.x - this.player.x
+      const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+      if (inFront && Math.abs(dx) < 180) {
+        enemy.setVelocityX(this.facingDir * 180)
+      }
+    }
+
+    this.statusMessage = 'Gust Dash!'
     this.updateUiText()
   }
 
@@ -400,7 +480,7 @@ const config: Phaser.Types.Core.GameConfig = {
   parent: 'app',
   width: 960,
   height: 540,
-  scene: [StageSelectScene, Stage1, RockyCavernsScene, BloodyHillsScene],
+  scene: [StageSelectScene, HeroSelectScene, Stage1, RockyCavernsScene, BloodyHillsScene],
   physics: {
     default: 'arcade',
     arcade: {
