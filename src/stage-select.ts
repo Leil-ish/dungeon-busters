@@ -3,7 +3,9 @@ import type { StageId } from './heroes'
 import { gameProgress, saveGameProgress } from './progress'
 
 export class StageSelectScene extends Phaser.Scene {
-  private selectText!: Phaser.GameObjects.Text
+  private leftColumnText!: Phaser.GameObjects.Text
+  private rightColumnText!: Phaser.GameObjects.Text
+  private controlsText!: Phaser.GameObjects.Text
   private statusText!: Phaser.GameObjects.Text
 
   constructor() {
@@ -25,38 +27,45 @@ export class StageSelectScene extends Phaser.Scene {
       fontSize: '28px',
     })
 
-    this.selectText = this.add.text(80, 200, '', {
+    this.leftColumnText = this.add.text(80, 206, '', {
       color: '#e7eeff',
       fontFamily: 'sans-serif',
-      fontSize: '21px',
-      lineSpacing: 6,
+      fontSize: '20px',
+      lineSpacing: 8,
     })
 
-    this.add.text(80, 428, 'Press 1 for Slippery Slopes', {
-      color: '#b2c5e9',
+    this.rightColumnText = this.add.text(520, 206, '', {
+      color: '#dbe6ff',
       fontFamily: 'sans-serif',
-      fontSize: '18px',
-    })
-    this.add.text(80, 450, 'Press 2 for Rocky Caverns', {
-      color: '#b2c5e9',
-      fontFamily: 'sans-serif',
-      fontSize: '18px',
-    })
-    this.add.text(80, 472, 'Press 3 for Bloody Hills', {
-      color: '#b2c5e9',
-      fontFamily: 'sans-serif',
-      fontSize: '18px',
-    })
-    this.add.text(80, 494, 'Press 4 for Laser Alley', {
-      color: '#b2c5e9',
-      fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '20px',
+      lineSpacing: 8,
     })
 
-    this.statusText = this.add.text(80, 518, '', {
+    this.controlsText = this.add.text(80, 392, '', {
+      color: '#b2c5e9',
+      fontFamily: 'sans-serif',
+      fontSize: '18px',
+    })
+    this.controlsText.setText(
+      [
+        'Press 1 for Slippery Slopes',
+        'Press 2 for Rocky Caverns',
+        'Press 3 for Bloody Hills',
+        'Press 4 for Laser Alley',
+        'Press 5 for Lava Bog',
+      ].join('\n'),
+    )
+
+    this.statusText = this.add.text(80, 502, '', {
       color: '#ffdca8',
       fontFamily: 'sans-serif',
       fontSize: '16px',
+    })
+
+    this.add.text(80, 522, 'Micralis is always available. Other heroes unlock by rescue progress.', {
+      color: '#ffdca8',
+      fontFamily: 'sans-serif',
+      fontSize: '14px',
     })
 
     this.input.keyboard?.on('keydown-ONE', () => this.queueHeroSelect('SLIPPERY_HILLS', 'stage1'))
@@ -84,23 +93,33 @@ export class StageSelectScene extends Phaser.Scene {
         'laser-alley',
       ),
     )
+    this.input.keyboard?.on('keydown-FIVE', () =>
+      this.tryQueueStage(gameProgress.lavaBogMap, 'Need Map to Lava Bog first.', 'LAVA_BOG', 'lava-bog'),
+    )
 
     this.refreshProgressText()
   }
 
   private refreshProgressText(): void {
-    this.selectText.setText(
+    this.leftColumnText.setText(
       [
-        `1. Stage 1: Slippery Slopes [Torrent Key Piece: ${gameProgress.torrentKeyPiece ? 'Yes' : 'No'}]`,
-        `2. Stage 2: Rocky Caverns   [Volcano Man: ${gameProgress.volcanoManRescued ? 'Rescued' : 'Missing'}]`,
-        `   Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Collected' : 'Missing'}`,
-        `3. Stage 3: Bloody Hills    [Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'}]`,
-        `   Bloody Map Piece: ${gameProgress.bloodyMapPiece ? 'Collected' : 'Missing'}`,
-        `4. Stage 4: Laser Alley    [Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'}]`,
-        `   Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Collected' : 'Missing'}`,
+        '1. Stage 1: Slippery Slopes',
+        '2. Stage 2: Rocky Caverns',
+        '3. Stage 3: Bloody Hills',
+        '4. Stage 4: Laser Alley',
+        '5. Stage 5: Lava Bog',
       ].join('\n'),
     )
-    this.statusText.setText('Micralis is always available. Other heroes unlock by rescue progress.')
+    this.rightColumnText.setText(
+      [
+        `Torrent Key Piece: ${gameProgress.torrentKeyPiece ? 'Yes' : 'No'}`,
+        `Volcano Man: ${gameProgress.volcanoManRescued ? 'Rescued' : 'Missing'} | Cavern Map: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
+        `Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'} | Bloody Map: ${gameProgress.bloodyMapPiece ? 'Yes' : 'No'}`,
+        `Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
+        `Bouldereye: ${gameProgress.bouldereyeRescued ? 'Rescued' : 'Trapped'} | Clear: ${gameProgress.lavaBogCleared ? 'Yes' : 'No'}`,
+      ].join('\n'),
+    )
+    this.statusText.setText('')
   }
 
   private queueHeroSelect(stageId: StageId, sceneKey: string): void {
@@ -115,6 +134,7 @@ export class StageSelectScene extends Phaser.Scene {
       this.statusText.setText(lockMessage)
       return
     }
+    this.statusText.setText('')
     this.queueHeroSelect(stageId, sceneKey)
   }
 }

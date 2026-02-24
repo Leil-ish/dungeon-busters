@@ -9,41 +9,55 @@ import {
 import { gameProgress, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 
-type TimedLaser = {
+type LavaZone = {
   rect: Phaser.GameObjects.Rectangle
   bounds: Phaser.Geom.Rectangle
-  onMs: number
-  offMs: number
-  active: boolean
 }
 
-export class LaserAlleyScene extends Phaser.Scene {
-  private readonly LEVEL_W = 3000
+type FallingDrip = {
+  rect: Phaser.GameObjects.Rectangle
+  bounds: Phaser.Geom.Rectangle
+}
+
+type EruptingVent = {
+  vent: Phaser.GameObjects.Rectangle
+  x: number
+  baseY: number
+}
+
+export class LavaBogScene extends Phaser.Scene {
+  private readonly LEVEL_W = 3200
   private readonly LEVEL_H = 900
 
   private player!: Phaser.Physics.Arcade.Sprite
   private patrolEnemy!: Phaser.Physics.Arcade.Sprite
-  private laserBot!: Phaser.Physics.Arcade.Sprite
+  private lavaBot!: Phaser.Physics.Arcade.Sprite
   private miniBoss!: Phaser.Physics.Arcade.Sprite
   private miniBossLabel!: Phaser.GameObjects.Text
-  private miniBossBaseY = 460
-  private swirlExanimo!: Phaser.Physics.Arcade.Sprite
-  private prismCell!: Phaser.GameObjects.Rectangle
-  private lavaBogMapPickup: Phaser.GameObjects.Rectangle | null = null
+  private miniBossBaseY = 470
+
+  private bouldereye!: Phaser.Physics.Arcade.Sprite
+  private illislimAlly!: Phaser.Physics.Arcade.Sprite
+  private hurricanoAlly!: Phaser.Physics.Arcade.Sprite
+  private vaultCell!: Phaser.GameObjects.Rectangle
+  private illislimCell!: Phaser.GameObjects.Rectangle
+  private hurricanoCell!: Phaser.GameObjects.Rectangle
   private rescueTrigger!: Phaser.GameObjects.Zone
+  private bossTrigger!: Phaser.GameObjects.Zone
+  private illislimTrigger!: Phaser.GameObjects.Zone
+  private hurricanoTrigger!: Phaser.GameObjects.Zone
   private exitDoor!: Phaser.GameObjects.Rectangle
 
   private shots!: Phaser.Physics.Arcade.Group
   private botShots!: Phaser.Physics.Arcade.Group
   private staticPlatforms: Phaser.GameObjects.Rectangle[] = []
-  private movingPlatforms: Phaser.Physics.Arcade.Image[] = []
-  private timedLasers: TimedLaser[] = []
-  private sweepLaser!: Phaser.GameObjects.Rectangle
-  private sweepLaserBounds = new Phaser.Geom.Rectangle(0, 0, 0, 0)
-  private sweepDir = 1
+  private lavaZones: LavaZone[] = []
+  private fallingDrips: FallingDrip[] = []
+  private vents: EruptingVent[] = []
+  private activeEruption: Phaser.GameObjects.Rectangle | null = null
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
-  private spaceKey!: Phaser.Input.Keyboard.Key
+  private fireKey!: Phaser.Input.Keyboard.Key
   private abilityKey!: Phaser.Input.Keyboard.Key
   private uiText!: Phaser.GameObjects.Text
 
@@ -53,12 +67,13 @@ export class LaserAlleyScene extends Phaser.Scene {
   private cutsceneLineIndex = 0
   private cutsceneActive = true
   private rescueSequenceActive = false
+  private dialogueOnEnd: (() => void) | null = null
 
   private selectedHero!: HeroDefinition
-  private effectiveStats = computeEffectivePlayerStats(DEFAULT_HERO_ID, 'LASER_HILLS', {
+  private effectiveStats = computeEffectivePlayerStats(DEFAULT_HERO_ID, 'LAVA_BOG', {
     moveAcceleration: 900,
     maxVelocityX: 260,
-    jumpVelocity: 560,
+    jumpVelocity: 590,
     shotCooldownMs: 220,
     shotSpeed: 520,
     damage: 1,
@@ -74,12 +89,15 @@ export class LaserAlleyScene extends Phaser.Scene {
   private readonly shotCooldownMs = 220
   private readonly shotSpeed = 520
   private readonly abilityCooldownMs = 1300
-  private readonly patrolMinX = 1280
-  private readonly patrolMaxX = 1480
-  private readonly patrolSpeed = 54
+  private readonly patrolMinX = 980
+  private readonly patrolMaxX = 1220
+  private readonly patrolSpeed = 60
 
   private stageClearTriggered = false
   private rescueDone = false
+  private illislimRescued = false
+  private hurricanoRescued = false
+  private bossFightStarted = false
   private miniBossDefeated = false
   private miniBossHealth = 6
   private isPlayerInvulnerable = false
@@ -90,19 +108,21 @@ export class LaserAlleyScene extends Phaser.Scene {
   private abilityCooldownScale = 1
   private damageReductionMul = 1
   private speedBoostActive = false
+  private allyLastShotAt = 0
+  private readonly allyShotCooldownMs = 950
 
-  private playerMaxHealth = 8
-  private playerHealth = 8
+  private playerMaxHealth = 10
+  private playerHealth = 7
   private checkpointX = 140
   private checkpointY = 690
   private healthPickup: Phaser.GameObjects.Rectangle | null = null
   private powerPickup: Phaser.GameObjects.Rectangle | null = null
 
-  private statusMessage = 'Navigate Laser Alley and rescue Swirl Exanimo.'
-  private readonly stageName = 'Stage 4: Laser Alley'
+  private statusMessage = 'Cross Lava Bog and rescue Bouldereye.'
+  private readonly stageName = 'Stage 5: Lava Bog'
 
   constructor() {
-    super('laser-alley')
+    super('lava-bog')
   }
 
   preload(): void {
@@ -112,14 +132,14 @@ export class LaserAlleyScene extends Phaser.Scene {
   create(): void {
     this.physics.world.setBounds(0, 0, this.LEVEL_W, this.LEVEL_H)
     this.cameras.main.setBounds(0, 0, this.LEVEL_W, this.LEVEL_H)
-    this.cameras.main.setBackgroundColor('#100f22')
+    this.cameras.main.setBackgroundColor('#1e0f0b')
 
     const selectedHeroId = (gameProgress.selectedHeroId ?? DEFAULT_HERO_ID) as HeroId
     this.selectedHero = HEROES[selectedHeroId] ?? HEROES[DEFAULT_HERO_ID]
-    this.effectiveStats = computeEffectivePlayerStats(this.selectedHero.id, 'LASER_HILLS', {
+    this.effectiveStats = computeEffectivePlayerStats(this.selectedHero.id, 'LAVA_BOG', {
       moveAcceleration: this.moveAcceleration,
       maxVelocityX: this.normalMaxVelocityX,
-      jumpVelocity: 560,
+      jumpVelocity: 590,
       shotCooldownMs: this.shotCooldownMs,
       shotSpeed: this.shotSpeed,
       damage: 1,
@@ -132,67 +152,64 @@ export class LaserAlleyScene extends Phaser.Scene {
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
-    const wardenTexture = this.textures.exists('enemy-laser-warden') ? 'enemy-laser-warden' : enemyTexture
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
     this.physics.add.collider(this.player, this.staticPlatforms)
-    for (const moving of this.movingPlatforms) {
-      this.physics.add.collider(this.player, moving)
-    }
 
-    this.patrolEnemy = this.physics.add.sprite(this.patrolMaxX, 648, enemyTexture)
+    this.patrolEnemy = this.physics.add.sprite(this.patrolMaxX, 698, enemyTexture)
     this.patrolEnemy.setCollideWorldBounds(true)
     this.patrolEnemy.setImmovable(true)
     ;(this.patrolEnemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
     this.patrolEnemy.setVelocityX(-this.patrolSpeed)
     this.physics.add.collider(this.patrolEnemy, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.patrolEnemy, () => this.applyDamage(1, 'Enemy hit! Try again.'))
+    this.physics.add.overlap(this.player, this.patrolEnemy, () => this.applyDamage(1, 'Enemy hit!'))
 
-    this.laserBot = this.physics.add.sprite(2110, 438, enemyTexture)
-    this.laserBot.setImmovable(true)
-    this.laserBot.setCollideWorldBounds(true)
-    ;(this.laserBot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.physics.add.collider(this.laserBot, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.laserBot, () => this.applyDamage(1, 'Laser Bot contact!'))
+    this.lavaBot = this.physics.add.sprite(1970, 498, enemyTexture)
+    this.lavaBot.setImmovable(true)
+    this.lavaBot.setCollideWorldBounds(true)
+    ;(this.lavaBot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.physics.add.collider(this.lavaBot, this.staticPlatforms)
+    this.physics.add.overlap(this.player, this.lavaBot, () => this.applyDamage(1, 'Lava Bot contact!'))
 
-    this.miniBoss = this.physics.add.sprite(2870, 430, wardenTexture)
-    this.miniBoss.setScale(1.25)
-    this.miniBoss.setTint(0xff9ab3)
+    this.miniBoss = this.physics.add.sprite(2860, 470, enemyTexture)
+    this.miniBoss.setScale(1.35)
+    this.miniBoss.setTint(0xff9b6a)
     this.miniBoss.setImmovable(true)
     this.miniBoss.setCollideWorldBounds(true)
-    this.miniBossBaseY = 430
     ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(52, 52, true)
+    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(56, 56, true)
     this.physics.add.collider(this.miniBoss, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.miniBoss, () => this.applyDamage(1, 'Laser Warden hit!'))
-    this.miniBossLabel = this.add.text(this.miniBoss.x - 56, this.miniBoss.y - 54, 'LASER WARDEN', {
-      color: '#ffd7e4',
+    this.physics.add.overlap(this.player, this.miniBoss, () => this.applyDamage(1, 'Infix hit!'))
+    this.miniBoss.disableBody(true, true)
+    this.miniBossLabel = this.add.text(this.miniBoss.x - 28, this.miniBoss.y - 56, 'INFIX', {
+      color: '#ffd2b5',
       fontFamily: 'sans-serif',
       fontSize: '14px',
-      backgroundColor: '#260918cc',
+      backgroundColor: '#2a1007cc',
       padding: { x: 6, y: 3 },
     })
+    this.miniBossLabel.setVisible(false)
     this.miniBossLabel.setDepth(24)
 
     this.createWeapons()
-    this.createLaserHazards()
     this.createRescueObjects()
     this.createCheckpointsAndItems()
+    this.createVolcanoVents()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
-    this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+    this.fireKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
     this.abilityKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X)
 
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15)
 
     this.uiText = this.add.text(16, 16, '', {
-      color: '#f3f6ff',
+      color: '#f6efe9',
       fontFamily: 'sans-serif',
       fontSize: '18px',
-      backgroundColor: '#09071acc',
+      backgroundColor: '#150b08cc',
       padding: { x: 10, y: 8 },
     })
     this.uiText.setDepth(50)
@@ -202,13 +219,15 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.initializeIntroCutscene()
     this.scheduleBotShot()
     this.scheduleMiniBossShot()
+    this.scheduleLavaDrips()
+    this.scheduleVentEruptions()
   }
 
   update(): void {
     if (this.cutsceneActive) {
       this.player.setAccelerationX(0)
       this.player.setVelocityX(0)
-      if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      if (Phaser.Input.Keyboard.JustDown(this.fireKey)) {
         this.advanceCutscene()
       }
       return
@@ -224,7 +243,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.player.setAccelerationX(0)
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+    if (Phaser.Input.Keyboard.JustDown(this.fireKey)) {
       this.fireShot()
     }
     if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
@@ -236,37 +255,45 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
 
-    if (!this.rescueDone) {
-      const inTrigger = this.physics.overlap(this.player, this.rescueTrigger)
-      const nearPrism = Phaser.Math.Distance.Between(this.player.x, this.player.y, 2790, 450) < 160
-      if (inTrigger || nearPrism) {
-        if (!this.miniBossDefeated) {
-          this.statusMessage = 'Defeat the Laser Warden first!'
-          this.updateUiText()
-        } else {
-          this.startRescueSequence()
-        }
+    if (!this.rescueDone && this.physics.overlap(this.player, this.rescueTrigger)) {
+      if (!this.miniBossDefeated) {
+        this.statusMessage = 'Defeat Infix first!'
+        this.updateUiText()
+      } else {
+        this.startRescueSequence()
       }
+    }
+
+    if (!this.bossFightStarted && this.physics.overlap(this.player, this.bossTrigger)) {
+      this.startBossFightSequence()
     }
 
     if (this.rescueDone && this.physics.overlap(this.player, this.exitDoor) && !this.stageClearTriggered) {
-      if (!gameProgress.lavaBogMap) {
-        this.statusMessage = 'Grab the Map to Lava Bog first!'
-        this.updateUiText()
-        return
-      }
       this.stageClearTriggered = true
-      this.statusMessage = 'STAGE CLEAR! Lava Bog map acquired.'
+      gameProgress.bouldereyeRescued = true
+      gameProgress.lavaBogCleared = true
+      saveGameProgress()
+      this.statusMessage = 'STAGE CLEAR! Bouldereye is free.'
       this.updateUiText()
-      this.time.delayedCall(1300, () => this.scene.start('stage-select'))
+      this.time.delayedCall(1400, () => this.scene.start('stage-select'))
     }
 
     this.updatePatrolEnemy()
-    this.updateMovingPlatforms()
     this.updateMiniBossMotion()
-    this.updateSweepLaser()
-    this.checkLaserHazards()
+    this.checkLavaHazards()
+    this.updateFallingDrips()
+    this.checkDripHazards()
+    this.checkEruptionHazard()
+    this.checkAllyRescues()
     this.updateRescuedFollower()
+    this.updateAlliedFollowers()
+    this.updateAllySupportFire()
+
+    if (!this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
+      this.miniBossDefeated = true
+      this.statusMessage = 'Infix defeated. Vault release open.'
+      this.updateUiText()
+    }
 
     const pBody = this.player.body as Phaser.Physics.Arcade.Body
     if (pBody.blocked.down && this.player.y > this.LEVEL_H - 36) {
@@ -300,16 +327,10 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     if (!this.textures.exists('laser-bot-shot')) {
-      gfx.fillStyle(0xff627a, 1)
+      gfx.fillStyle(0xff7748, 1)
       gfx.fillRect(0, 0, 14, 6)
       gfx.generateTexture('laser-bot-shot', 14, 6)
       gfx.clear()
-    }
-
-    if (!this.textures.exists('moving-platform')) {
-      gfx.fillStyle(0x53628a, 1)
-      gfx.fillRect(0, 0, 140, 18)
-      gfx.generateTexture('moving-platform', 140, 18)
     }
 
     gfx.destroy()
@@ -317,89 +338,79 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private createBackdrop(): void {
     const bg = this.add.graphics()
-    bg.fillStyle(0x130f2b, 1)
+    bg.fillStyle(0x200e0a, 1)
     bg.fillRect(0, 0, this.LEVEL_W, this.LEVEL_H)
-    for (let x = 0; x < this.LEVEL_W; x += 160) {
-      bg.fillStyle(0x2a2353, 0.35)
-      bg.fillRect(x, 0, 30, this.LEVEL_H)
+    for (let x = 0; x < this.LEVEL_W; x += 180) {
+      bg.fillStyle(0x3a160f, 0.28)
+      bg.fillRect(x, 0, 42, this.LEVEL_H)
     }
     bg.setDepth(-30)
   }
 
   private buildLevelGeometry(): void {
     const platforms: Array<[number, number, number, number, number]> = [
-      [220, 860, 440, 80, 0x34324a],
-      [760, 860, 360, 80, 0x34324a],
-      [1200, 860, 300, 80, 0x34324a],
-      [1590, 860, 220, 80, 0x34324a],
-      [1920, 860, 240, 80, 0x34324a],
-      [2270, 860, 220, 80, 0x34324a],
-      [2600, 860, 300, 80, 0x34324a],
+      [220, 860, 420, 80, 0x4b352d],
+      [700, 860, 280, 80, 0x4b352d],
+      [1120, 860, 220, 80, 0x4b352d],
+      [1420, 860, 220, 80, 0x4b352d],
+      [1740, 860, 220, 80, 0x4b352d],
+      [2080, 860, 220, 80, 0x4b352d],
+      [2420, 860, 220, 80, 0x4b352d],
+      [2760, 860, 220, 80, 0x4b352d],
 
-      [1180, 730, 220, 22, 0x5d67a1],
-      [1520, 700, 220, 22, 0x5d67a1],
-
-      [1940, 780, 180, 22, 0x5d67a1],
-      [2120, 720, 170, 22, 0x5d67a1],
-      [2300, 660, 170, 22, 0x5d67a1],
-      [2480, 600, 170, 22, 0x5d67a1],
-      [2660, 540, 170, 22, 0x5d67a1],
-      [2835, 480, 170, 22, 0x5d67a1],
-      [2940, 430, 130, 22, 0x5d67a1],
+      [980, 740, 220, 22, 0x7a5a4a],
+      [1180, 710, 190, 22, 0x7a5a4a],
+      [1380, 680, 180, 22, 0x7a5a4a],
+      [1590, 650, 180, 22, 0x7a5a4a],
+      [1810, 620, 180, 22, 0x7a5a4a],
+      [2040, 590, 170, 22, 0x7a5a4a],
+      [2270, 560, 170, 22, 0x7a5a4a],
+      [2500, 530, 170, 22, 0x7a5a4a],
+      [2730, 500, 190, 22, 0x7a5a4a],
+      [2920, 470, 190, 22, 0x7a5a4a],
+      [3070, 400, 150, 22, 0x7a5a4a],
     ]
 
     this.staticPlatforms = platforms.map(([x, y, w, h, color]) => this.createStaticPlatform(x, y, w, h, color))
 
-    const moving1 = this.physics.add.image(1760, 690, 'moving-platform')
-    moving1.setImmovable(true)
-    ;(moving1.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    moving1.setVelocityX(45)
-    this.movingPlatforms.push(moving1)
+    this.addLavaZone(820, 860, 120, 70)
+    this.addLavaZone(1260, 860, 120, 70)
+    this.addLavaZone(1580, 860, 120, 70)
+    this.addLavaZone(1920, 860, 120, 70)
+    this.addLavaZone(2260, 860, 120, 70)
+    this.addLavaZone(2600, 860, 120, 70)
+  }
 
-    const moving2 = this.physics.add.image(2460, 640, 'moving-platform')
-    moving2.setImmovable(true)
-    ;(moving2.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    moving2.setVelocityX(-40)
-    this.movingPlatforms.push(moving2)
+  private addLavaZone(centerX: number, centerY: number, width: number, height: number): void {
+    const rect = this.add.rectangle(centerX, centerY, width, height, 0xff5c2b, 0.55)
+    rect.setDepth(2)
+    this.lavaZones.push({
+      rect,
+      bounds: new Phaser.Geom.Rectangle(centerX - width / 2, centerY - height / 2, width, height),
+    })
   }
 
   private createWeapons(): void {
     this.shots = this.physics.add.group({ allowGravity: false, maxSize: 12 })
     this.physics.add.collider(this.shots, this.staticPlatforms, (obj1, obj2) => {
-      const maybeShot1 = obj1 as unknown as { texture?: { key?: string } }
-      const maybeShot2 = obj2 as unknown as { texture?: { key?: string } }
+      const maybe1 = obj1 as unknown as { texture?: { key?: string } }
+      const maybe2 = obj2 as unknown as { texture?: { key?: string } }
       const shotCandidate =
-        maybeShot1.texture?.key === 'electro-shot'
+        maybe1.texture?.key === 'electro-shot'
           ? (obj1 as Phaser.GameObjects.GameObject)
-          : maybeShot2.texture?.key === 'electro-shot'
+          : maybe2.texture?.key === 'electro-shot'
             ? (obj2 as Phaser.GameObjects.GameObject)
             : null
       if (!shotCandidate) {
         return
       }
-      const shot = shotCandidate as Phaser.Physics.Arcade.Image
-      shot.disableBody(true, true)
+      ;(shotCandidate as Phaser.Physics.Arcade.Image).disableBody(true, true)
     })
-    for (const moving of this.movingPlatforms) {
-      this.physics.add.collider(this.shots, moving, (obj1, obj2) => {
-        const maybe1 = obj1 as unknown as { texture?: { key?: string } }
-        const maybe2 = obj2 as unknown as { texture?: { key?: string } }
-        const shotCandidate =
-          maybe1.texture?.key === 'electro-shot'
-            ? (obj1 as Phaser.GameObjects.GameObject)
-            : maybe2.texture?.key === 'electro-shot'
-              ? (obj2 as Phaser.GameObjects.GameObject)
-              : null
-        if (!shotCandidate) {
-          return
-        }
-        ;(shotCandidate as Phaser.Physics.Arcade.Image).disableBody(true, true)
-      })
-    }
+
     this.physics.add.overlap(this.shots, this.patrolEnemy, (shotObj, enemyObj) => {
       this.handleEnemyShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
     })
-    this.physics.add.overlap(this.shots, this.laserBot, (shotObj, enemyObj) => {
+    this.physics.add.overlap(this.shots, this.lavaBot, (shotObj, enemyObj) => {
       this.handleEnemyShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
     })
     this.physics.add.overlap(this.shots, this.miniBoss, (shotObj, enemyObj) => {
@@ -421,85 +432,125 @@ export class LaserAlleyScene extends Phaser.Scene {
       }
       ;(shotCandidate as Phaser.Physics.Arcade.Image).disableBody(true, true)
     })
-    for (const moving of this.movingPlatforms) {
-      this.physics.add.collider(this.botShots, moving, (obj1, obj2) => {
-        const maybe1 = obj1 as unknown as { texture?: { key?: string } }
-        const maybe2 = obj2 as unknown as { texture?: { key?: string } }
-        const shotCandidate =
-          maybe1.texture?.key === 'laser-bot-shot'
-            ? (obj1 as Phaser.GameObjects.GameObject)
-            : maybe2.texture?.key === 'laser-bot-shot'
-              ? (obj2 as Phaser.GameObjects.GameObject)
-              : null
-        if (!shotCandidate) {
-          return
-        }
-        ;(shotCandidate as Phaser.Physics.Arcade.Image).disableBody(true, true)
-      })
-    }
-    this.physics.add.overlap(this.player, this.botShots, () => this.applyDamage(3, 'Laser shot hit!'))
-  }
-
-  private createLaserHazards(): void {
-    this.addTimedLaser(1010, 795, 14, 120, 1300, 1200)
-    this.addTimedLaser(1410, 795, 14, 120, 1400, 1200)
-    this.addTimedLaser(2210, 520, 14, 140, 900, 800)
-    this.addTimedLaser(2490, 470, 14, 140, 900, 800)
-
-    this.sweepLaser = this.add.rectangle(1700, 760, 220, 16, 0xff4c80, 0.75)
-    this.sweepLaser.setDepth(12)
-    this.updateSweepLaserBounds()
-  }
-
-  private addTimedLaser(x: number, y: number, w: number, h: number, onMs: number, offMs: number): void {
-    const rect = this.add.rectangle(x, y, w, h, 0xff628e, 0.72)
-    rect.setDepth(12)
-    const laser: TimedLaser = {
-      rect,
-      bounds: new Phaser.Geom.Rectangle(x - w / 2, y - h / 2, w, h),
-      onMs,
-      offMs,
-      active: true,
-    }
-    this.timedLasers.push(laser)
-
-    const toggle = (): void => {
-      laser.active = !laser.active
-      laser.rect.setVisible(laser.active)
-      this.time.delayedCall(laser.active ? laser.onMs : laser.offMs, toggle)
-    }
-    this.time.delayedCall(laser.onMs, toggle)
+    this.physics.add.overlap(this.player, this.botShots, () => this.applyDamage(1, 'Molten shot hit!'))
   }
 
   private createRescueObjects(): void {
-    this.prismCell = this.add.rectangle(2790, 450, 90, 140, 0x8ca4ff, 0.38)
-    this.prismCell.setStrokeStyle(3, 0xd8e4ff, 0.9)
+    this.illislimCell = this.add.rectangle(1540, 620, 72, 110, 0x9ef27f, 0.24)
+    this.illislimCell.setStrokeStyle(2, 0xc4ffd0, 0.85)
+    this.illislimTrigger = this.add.zone(1540, 620, 120, 140)
+    this.physics.add.existing(this.illislimTrigger, true)
 
-    const swirlTexture = this.textures.exists('hero-swirl-exanimo') ? 'hero-swirl-exanimo' : 'player-block'
-    this.swirlExanimo = this.physics.add.sprite(2790, 450, swirlTexture)
-    this.swirlExanimo.setVisible(false)
-    this.swirlExanimo.disableBody(true, true)
-    this.physics.add.collider(this.swirlExanimo, this.staticPlatforms)
+    this.hurricanoCell = this.add.rectangle(2180, 560, 72, 110, 0x8de8ff, 0.24)
+    this.hurricanoCell.setStrokeStyle(2, 0xc8f5ff, 0.85)
+    this.hurricanoTrigger = this.add.zone(2180, 560, 120, 140)
+    this.physics.add.existing(this.hurricanoTrigger, true)
 
-    this.rescueTrigger = this.add.zone(2790, 450, 300, 320)
+    this.bossTrigger = this.add.zone(2700, 500, 240, 300)
+    this.physics.add.existing(this.bossTrigger, true)
+
+    const illislimTexture = this.textures.exists('hero-illislim') ? 'hero-illislim' : 'player-block'
+    this.illislimAlly = this.physics.add.sprite(1540, 620, illislimTexture)
+    this.illislimAlly.setVisible(false)
+    this.illislimAlly.disableBody(true, true)
+    this.physics.add.collider(this.illislimAlly, this.staticPlatforms)
+
+    const hurricanoTexture = this.textures.exists('hero-hurricano-man') ? 'hero-hurricano-man' : 'player-block'
+    this.hurricanoAlly = this.physics.add.sprite(2180, 560, hurricanoTexture)
+    this.hurricanoAlly.setVisible(false)
+    this.hurricanoAlly.disableBody(true, true)
+    this.physics.add.collider(this.hurricanoAlly, this.staticPlatforms)
+
+    this.vaultCell = this.add.rectangle(2860, 460, 90, 140, 0xcf9d5d, 0.3)
+    this.vaultCell.setStrokeStyle(3, 0xffd18e, 0.9)
+
+    const boulderTexture = this.textures.exists('hero-bouldereye') ? 'hero-bouldereye' : 'player-block'
+    this.bouldereye = this.physics.add.sprite(2860, 460, boulderTexture)
+    this.bouldereye.setVisible(false)
+    this.bouldereye.disableBody(true, true)
+    this.physics.add.collider(this.bouldereye, this.staticPlatforms)
+
+    this.rescueTrigger = this.add.zone(2860, 460, 260, 260)
     this.physics.add.existing(this.rescueTrigger, true)
 
-    if (!gameProgress.lavaBogMap) {
-      this.lavaBogMapPickup = this.add.rectangle(2520, 560, 28, 20, 0xffe08a, 0.95)
-      this.lavaBogMapPickup.setStrokeStyle(2, 0x7a5c2b, 1)
-      this.physics.add.existing(this.lavaBogMapPickup, true)
-      this.physics.add.overlap(this.player, this.lavaBogMapPickup, () => this.collectLavaBogMap())
-    }
-
-    this.exitDoor = this.add.rectangle(2960, 340, 54, 140, 0x8ec8ff)
+    this.exitDoor = this.add.rectangle(this.LEVEL_W - 90, 340, 54, 140, 0xffa46b)
     this.exitDoor.setAlpha(0.3)
     this.physics.add.existing(this.exitDoor, true)
   }
 
+  private checkAllyRescues(): void {
+    if (!this.illislimRescued && this.physics.overlap(this.player, this.illislimTrigger)) {
+      this.illislimRescued = true
+      this.illislimCell.destroy()
+      this.illislimAlly.enableBody(true, 1540, 620, true, true)
+      this.illislimAlly.setVisible(true)
+      this.illislimAlly.setImmovable(true)
+      ;(this.illislimAlly.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.statusMessage = 'Illislim joined your team!'
+      this.playTone(620, 0.1)
+      this.updateUiText()
+      this.startDialogue(
+        [
+          'Illislim: The lava tunnels shifted, so I tracked your signal.',
+          'Illislim: I can reinforce your flank against Infix.',
+          'Press Space to continue.',
+        ],
+        () => {
+          this.statusMessage = 'Illislim is now assisting.'
+          this.updateUiText()
+        },
+      )
+      return
+    }
+
+    if (!this.hurricanoRescued && this.physics.overlap(this.player, this.hurricanoTrigger)) {
+      this.hurricanoRescued = true
+      this.hurricanoCell.destroy()
+      this.hurricanoAlly.enableBody(true, 2180, 560, true, true)
+      this.hurricanoAlly.setVisible(true)
+      this.hurricanoAlly.setImmovable(true)
+      ;(this.hurricanoAlly.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.statusMessage = 'Hurricano Man joined your team!'
+      this.playTone(700, 0.1)
+      this.updateUiText()
+      this.startDialogue(
+        [
+          'Hurricano Man: I rode the ash currents into Lava Bog.',
+          'Hurricano Man: I will pressure Infix from range.',
+          'Press Space to continue.',
+        ],
+        () => {
+          this.statusMessage = 'Hurricano Man is now assisting.'
+          this.updateUiText()
+        },
+      )
+    }
+  }
+
+  private startBossFightSequence(): void {
+    if (this.bossFightStarted) {
+      return
+    }
+    this.bossFightStarted = true
+    this.miniBoss.enableBody(true, 2860, 470, true, true)
+    this.miniBossLabel.setVisible(true)
+    this.startDialogue(
+      [
+        'Infix: Lava Bog belongs to me.',
+        'Micralis: Team formation. Take Infix down.',
+        'Press Space to begin the boss fight.',
+      ],
+      () => {
+        this.statusMessage = 'Boss fight started: Infix.'
+        this.updateUiText()
+      },
+    )
+  }
+
   private createCheckpointsAndItems(): void {
     const defs: Array<[number, number]> = [
-      [1280, 640],
-      [2300, 430],
+      [1020, 690],
+      [2280, 530],
     ]
     defs.forEach(([x, y]) => {
       const cp = this.add.rectangle(x, y, 20, 72, 0xffc76b, 0.9)
@@ -507,13 +558,13 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.physics.add.overlap(this.player, cp, () => this.activateCheckpoint(cp, x, y))
     })
 
-    this.healthPickup = this.add.rectangle(1720, 790, 24, 24, 0x7aff7a, 0.95)
+    this.healthPickup = this.add.rectangle(1700, 790, 24, 24, 0x7aff7a, 0.95)
     this.physics.add.existing(this.healthPickup, true)
     this.physics.add.overlap(this.player, this.healthPickup, () => {
       if (!this.healthPickup) {
         return
       }
-      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 3)
+      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 4)
       this.healthPickup.destroy()
       this.healthPickup = null
       this.statusMessage = 'Health restored.'
@@ -521,7 +572,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.updateUiText()
     })
 
-    this.powerPickup = this.add.rectangle(2580, 300, 22, 22, 0x82e8ff, 0.95)
+    this.powerPickup = this.add.rectangle(2500, 490, 22, 22, 0xffbf82, 0.95)
     this.physics.add.existing(this.powerPickup, true)
     this.physics.add.overlap(this.player, this.powerPickup, () => {
       if (!this.powerPickup) {
@@ -531,31 +582,10 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.abilityCooldownScale = 0.82
       this.powerPickup.destroy()
       this.powerPickup = null
-      this.statusMessage = 'Power core found. Cooldowns reduced.'
+      this.statusMessage = 'Magma core found. Cooldowns reduced.'
       this.playTone(640, 0.1)
       this.updateUiText()
     })
-  }
-
-  private collectLavaBogMap(): void {
-    if (!this.lavaBogMapPickup || gameProgress.lavaBogMap) {
-      return
-    }
-    gameProgress.lavaBogMap = true
-    saveGameProgress()
-    this.statusMessage = 'Map to Lava Bog collected!'
-    this.playTone(720, 0.12)
-    const pulse = this.add.circle(this.lavaBogMapPickup.x, this.lavaBogMapPickup.y, 10, 0xfff0b0, 0.8)
-    this.tweens.add({
-      targets: pulse,
-      alpha: 0,
-      scale: 4,
-      duration: 280,
-      onComplete: () => pulse.destroy(),
-    })
-    this.lavaBogMapPickup.destroy()
-    this.lavaBogMapPickup = null
-    this.updateUiText()
   }
 
   private activateCheckpoint(cp: Phaser.GameObjects.Rectangle, x: number, y: number): void {
@@ -576,24 +606,24 @@ export class LaserAlleyScene extends Phaser.Scene {
       delay: 1900,
       loop: true,
       callback: () => {
-        if (!this.scene.isActive() || this.cutsceneActive || !this.laserBot.active) {
+        if (!this.scene.isActive() || this.cutsceneActive || !this.lavaBot.active) {
           return
         }
 
-        const shot = this.botShots.get(this.laserBot.x - 20, this.laserBot.y, 'laser-bot-shot') as
+        const shot = this.botShots.get(this.lavaBot.x - 20, this.lavaBot.y, 'laser-bot-shot') as
           | Phaser.Physics.Arcade.Image
           | null
         if (!shot) {
           return
         }
 
-        const dirX = this.player.x - this.laserBot.x
-        const dirY = this.player.y - this.laserBot.y
+        const dirX = this.player.x - this.lavaBot.x
+        const dirY = this.player.y - this.lavaBot.y
         const len = Math.max(1, Math.hypot(dirX, dirY))
-        shot.enableBody(true, this.laserBot.x - 20, this.laserBot.y, true, true)
+        shot.enableBody(true, this.lavaBot.x - 20, this.lavaBot.y, true, true)
         shot.setActive(true)
         shot.setVisible(true)
-        shot.setVelocity((dirX / len) * 220, (dirY / len) * 220)
+        shot.setVelocity((dirX / len) * 240, (dirY / len) * 240)
         this.time.delayedCall(1800, () => shot.disableBody(true, true))
       },
     })
@@ -621,7 +651,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         shot.enableBody(true, this.miniBoss.x - 18, this.miniBoss.y - 12, true, true)
         shot.setActive(true)
         shot.setVisible(true)
-        shot.setVelocity((dirX / len) * 240, (dirY / len) * 240)
+        shot.setVelocity((dirX / len) * 250, (dirY / len) * 250)
         this.time.delayedCall(1800, () => shot.disableBody(true, true))
       },
     })
@@ -629,16 +659,12 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private updateMiniBossMotion(): void {
     if (!this.miniBoss.active || this.miniBossDefeated) {
-      if (this.miniBossLabel) {
-        this.miniBossLabel.setVisible(false)
-      }
+      this.miniBossLabel.setVisible(false)
       return
     }
-    this.miniBoss.y = this.miniBossBaseY + Math.sin(this.time.now / 280) * 12
-    if (this.miniBossLabel) {
-      this.miniBossLabel.setVisible(true)
-      this.miniBossLabel.setPosition(this.miniBoss.x - 56, this.miniBoss.y - 54)
-    }
+    this.miniBoss.y = this.miniBossBaseY + Math.sin(this.time.now / 300) * 12
+    this.miniBossLabel.setVisible(true)
+    this.miniBossLabel.setPosition(this.miniBoss.x - 50, this.miniBoss.y - 56)
   }
 
   private updatePatrolEnemy(): void {
@@ -652,55 +678,116 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
   }
 
-  private updateMovingPlatforms(): void {
-    const [m1, m2] = this.movingPlatforms
-    if (m1) {
-      if (m1.x < 1660) m1.setVelocityX(45)
-      else if (m1.x > 1860) m1.setVelocityX(-45)
-    }
-    if (m2) {
-      if (m2.x < 2360) m2.setVelocityX(40)
-      else if (m2.x > 2580) m2.setVelocityX(-40)
-    }
-  }
-
-  private updateSweepLaser(): void {
-    if (!this.sweepLaser) {
-      return
-    }
-    this.sweepLaser.y += this.sweepDir * 1.1
-    if (this.sweepLaser.y < 650) {
-      this.sweepDir = 1
-    } else if (this.sweepLaser.y > 810) {
-      this.sweepDir = -1
-    }
-    this.updateSweepLaserBounds()
-  }
-
-  private updateSweepLaserBounds(): void {
-    this.sweepLaserBounds.setTo(
-      this.sweepLaser.x - this.sweepLaser.width / 2,
-      this.sweepLaser.y - this.sweepLaser.height / 2,
-      this.sweepLaser.width,
-      this.sweepLaser.height,
-    )
-  }
-
-  private checkLaserHazards(): void {
+  private checkLavaHazards(): void {
     if (this.cutsceneActive) {
       return
     }
 
     const p = this.player.getBounds()
-    for (const laser of this.timedLasers) {
-      if (laser.active && Phaser.Geom.Intersects.RectangleToRectangle(p, laser.bounds)) {
-        this.applyDamage(3, 'Timed laser hit!')
+    for (const lava of this.lavaZones) {
+      if (Phaser.Geom.Intersects.RectangleToRectangle(p, lava.bounds)) {
+        this.applyDamage(1, 'Lava burn!')
         return
       }
     }
+  }
 
-    if (Phaser.Geom.Intersects.RectangleToRectangle(p, this.sweepLaserBounds)) {
-      this.applyDamage(3, 'Sweeper laser hit!')
+  private createVolcanoVents(): void {
+    const ventDefs: Array<[number, number]> = [
+      [1290, 828],
+      [1930, 828],
+      [2590, 828],
+    ]
+    for (const [x, y] of ventDefs) {
+      const vent = this.add.rectangle(x, y, 32, 26, 0x8f3e1b, 0.95)
+      vent.setStrokeStyle(2, 0xff9a66, 0.9)
+      this.vents.push({ vent, x, baseY: y - 16 })
+    }
+  }
+
+  private scheduleLavaDrips(): void {
+    const dripSpawnXs = [1040, 1490, 1840, 2250, 2680]
+    this.time.addEvent({
+      delay: 1250,
+      loop: true,
+      callback: () => {
+        if (!this.scene.isActive() || this.cutsceneActive) {
+          return
+        }
+        const spawnX = Phaser.Utils.Array.GetRandom(dripSpawnXs)
+        const drip = this.add.rectangle(spawnX, 84, 10, 18, 0xff7b43, 0.9)
+        drip.setDepth(14)
+        this.fallingDrips.push({
+          rect: drip,
+          bounds: new Phaser.Geom.Rectangle(spawnX - 5, 75, 10, 18),
+        })
+      },
+    })
+  }
+
+  private updateFallingDrips(): void {
+    for (let i = this.fallingDrips.length - 1; i >= 0; i -= 1) {
+      const drip = this.fallingDrips[i]
+      drip.rect.y += 8
+      drip.bounds.setTo(drip.rect.x - drip.rect.width / 2, drip.rect.y - drip.rect.height / 2, drip.rect.width, drip.rect.height)
+      if (drip.rect.y > this.LEVEL_H - 30) {
+        drip.rect.destroy()
+        this.fallingDrips.splice(i, 1)
+      }
+    }
+  }
+
+  private checkDripHazards(): void {
+    if (this.cutsceneActive) {
+      return
+    }
+    const p = this.player.getBounds()
+    for (const drip of this.fallingDrips) {
+      if (Phaser.Geom.Intersects.RectangleToRectangle(p, drip.bounds)) {
+        this.applyDamage(1, 'Lava drip hit!')
+        return
+      }
+    }
+  }
+
+  private scheduleVentEruptions(): void {
+    this.time.addEvent({
+      delay: 2100,
+      loop: true,
+      callback: () => {
+        if (!this.scene.isActive() || this.cutsceneActive || this.vents.length === 0 || this.activeEruption) {
+          return
+        }
+        const vent = Phaser.Utils.Array.GetRandom(this.vents)
+        const column = this.add.rectangle(vent.x, vent.baseY, 24, 10, 0xff8b4d, 0.9)
+        column.setDepth(13)
+        this.activeEruption = column
+        this.tweens.add({
+          targets: column,
+          height: 130,
+          y: vent.baseY - 60,
+          duration: 150,
+          yoyo: true,
+          hold: 220,
+          onComplete: () => {
+            column.destroy()
+            if (this.activeEruption === column) {
+              this.activeEruption = null
+            }
+          },
+        })
+      },
+    })
+  }
+
+  private checkEruptionHazard(): void {
+    if (!this.activeEruption || this.cutsceneActive) {
+      return
+    }
+    const eBounds = this.activeEruption.getBounds()
+    const pBounds = this.player.getBounds()
+    if (Phaser.Geom.Intersects.RectangleToRectangle(pBounds, eBounds)) {
+      this.applyDamage(1, 'Volcano eruption hit!')
     }
   }
 
@@ -713,66 +800,106 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.cutsceneActive = true
     this.player.setAccelerationX(0)
     this.player.setVelocity(0, 0)
-    this.statusMessage = 'The prism is destabilizing...'
+    this.statusMessage = 'The vault seal is cracking...'
     this.updateUiText()
 
-    this.time.delayedCall(420, () => {
-      this.tweens.add({
-        targets: this.prismCell,
-        alpha: 0.2,
-        yoyo: true,
-        repeat: 2,
-        duration: 150,
-      })
+    this.time.delayedCall(650, () => {
+      this.vaultCell.destroy()
+      this.bouldereye.enableBody(true, 2860, 430, true, true)
+      this.bouldereye.setVisible(true)
+      this.bouldereye.setImmovable(true)
+      ;(this.bouldereye.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
     })
 
-    this.time.delayedCall(980, () => {
-      this.prismCell.destroy()
-      this.swirlExanimo.enableBody(true, 2790, 390, true, true)
-      this.swirlExanimo.setVisible(true)
-      this.swirlExanimo.setImmovable(true)
-      ;(this.swirlExanimo.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-      this.tweens.add({
-        targets: this.swirlExanimo,
-        y: 460,
-        duration: 550,
-        ease: 'Sine.Out',
-      })
-    })
-
-    this.time.delayedCall(1750, () => {
-      this.swirlExanimo.setPosition(2790, 460)
-      this.swirlExanimo.setVelocity(0, 0)
-      this.swirlExanimo.setImmovable(true)
-      ;(this.swirlExanimo.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-
+    this.time.delayedCall(1400, () => {
       this.cutsceneLines = [
-        'Swirl Exanimo: Okay, we are ready.',
-        'Swirl Exanimo: Keep moving. Laser Alley is syncing again.',
+        'Bouldereye: You made it through Lava Bog.',
+        'Bouldereye: Team status restored. Move to extraction.',
         'Press Space to continue.',
       ]
       this.cutsceneLineIndex = 0
       this.showCutscenePanel(this.cutsceneLines[0])
 
       this.rescueDone = true
-      gameProgress.swirlExanimoRescued = true
-      saveGameProgress()
       this.exitDoor.setAlpha(1)
-      this.statusMessage = 'Swirl Exanimo rescued. Reach the exit.'
+      this.statusMessage = 'Bouldereye rescued. Reach the exit.'
       this.updateUiText()
     })
   }
 
   private updateRescuedFollower(): void {
-    if (!this.rescueDone || !this.swirlExanimo.active) {
+    if (!this.rescueDone || !this.bouldereye.active) {
       return
     }
 
-    const targetX = this.player.x - this.facingDir * 60
+    const targetX = this.player.x - this.facingDir * 64
     const targetY = this.player.y
     const followLerp = 0.08
-    this.swirlExanimo.x = Phaser.Math.Linear(this.swirlExanimo.x, targetX, followLerp)
-    this.swirlExanimo.y = Phaser.Math.Linear(this.swirlExanimo.y, targetY, followLerp)
+    this.bouldereye.x = Phaser.Math.Linear(this.bouldereye.x, targetX, followLerp)
+    this.bouldereye.y = Phaser.Math.Linear(this.bouldereye.y, targetY, followLerp)
+  }
+
+  private updateAlliedFollowers(): void {
+    const followAlly = (
+      ally: Phaser.Physics.Arcade.Sprite,
+      active: boolean,
+      offsetX: number,
+      offsetY: number,
+    ): void => {
+      if (!active || !ally.active) {
+        return
+      }
+      const targetX = this.player.x + offsetX * this.facingDir
+      const targetY = this.player.y + offsetY
+      const followLerp = 0.08
+      ally.x = Phaser.Math.Linear(ally.x, targetX, followLerp)
+      ally.y = Phaser.Math.Linear(ally.y, targetY, followLerp)
+    }
+
+    followAlly(this.illislimAlly, this.illislimRescued, -84, -6)
+    followAlly(this.hurricanoAlly, this.hurricanoRescued, -116, -18)
+  }
+
+  private updateAllySupportFire(): void {
+    if (!this.bossFightStarted || !this.miniBoss.active || this.miniBossDefeated || this.cutsceneActive) {
+      return
+    }
+    if (!this.illislimRescued && !this.hurricanoRescued) {
+      return
+    }
+    if (Phaser.Math.Distance.Between(this.player.x, this.player.y, this.miniBoss.x, this.miniBoss.y) > 700) {
+      return
+    }
+    if (this.time.now - this.allyLastShotAt < this.allyShotCooldownMs) {
+      return
+    }
+
+    this.allyLastShotAt = this.time.now
+    if (this.illislimRescued && this.illislimAlly.active) {
+      this.spawnAllyShot(this.illislimAlly.x, this.illislimAlly.y - 6, 0x98ffb4)
+    }
+    if (this.hurricanoRescued && this.hurricanoAlly.active) {
+      this.spawnAllyShot(this.hurricanoAlly.x, this.hurricanoAlly.y - 6, 0x9eefff)
+    }
+  }
+
+  private spawnAllyShot(fromX: number, fromY: number, tint: number): void {
+    const bolt = this.add.rectangle(fromX, fromY, 10, 6, tint, 0.95)
+    bolt.setDepth(20)
+    this.tweens.add({
+      targets: bolt,
+      x: this.miniBoss.x,
+      y: this.miniBoss.y,
+      duration: 260,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        bolt.destroy()
+        if (!this.miniBoss.active || this.miniBossDefeated) {
+          return
+        }
+        this.damageMiniBoss(1)
+      },
+    })
   }
 
   private applyDamage(amount: number, message: string, forceRespawn = false): void {
@@ -846,20 +973,30 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    this.miniBossHealth -= 1
-    enemy.setTint(0xff8aa6)
-    this.time.delayedCall(100, () => enemy.clearTint())
+    this.damageMiniBoss(1)
+  }
+
+  private damageMiniBoss(amount: number): void {
+    if (!this.miniBoss.active || this.miniBossDefeated) {
+      return
+    }
+
+    this.miniBossHealth -= amount
+    this.miniBoss.setTint(0xffc1a4)
+    this.time.delayedCall(100, () => {
+      if (this.miniBoss.active) {
+        this.miniBoss.clearTint()
+      }
+    })
 
     if (this.miniBossHealth <= 0) {
       this.miniBossDefeated = true
-      enemy.disableBody(true, true)
-      if (this.miniBossLabel) {
-        this.miniBossLabel.setVisible(false)
-      }
-      this.statusMessage = 'Laser Warden defeated. Rescue path open.'
+      this.miniBoss.disableBody(true, true)
+      this.miniBossLabel.setVisible(false)
+      this.statusMessage = 'Infix defeated. Rescue path open.'
       this.playTone(260, 0.12)
     } else {
-      this.statusMessage = `Laser Warden HP: ${this.miniBossHealth}`
+      this.statusMessage = `Infix HP: ${this.miniBossHealth}`
     }
 
     this.updateUiText()
@@ -872,7 +1009,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     this.lastAbilityAt = now
-    const enemies = [this.patrolEnemy, this.laserBot]
+    const enemies = [this.patrolEnemy, this.lavaBot]
 
     const pushEnemies = (): void => {
       for (const enemy of enemies) {
@@ -933,7 +1070,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
         this.physics.add.existing(trail, true)
         this.physics.add.overlap(trail, this.patrolEnemy, () => this.patrolEnemy.disableBody(true, true))
-        this.physics.add.overlap(trail, this.laserBot, () => this.laserBot.disableBody(true, true))
+        this.physics.add.overlap(trail, this.lavaBot, () => this.lavaBot.disableBody(true, true))
         this.time.delayedCall(2200, () => trail.destroy())
         this.statusMessage = 'Molten Trail ignited.'
         this.playTone(320, 0.09)
@@ -969,10 +1106,10 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private initializeIntroCutscene(): void {
     this.cutsceneLines = [
-      'Inspector Glowman: Laser Alley ahead. Stay sharp.',
-      'Electroman: Patterns are cycling. Move on the off-beats.',
-      'Micralis: Vertical climb route is the cleanest path.',
-      'Mission: Rescue Swirl Exanimo and secure the map to Lava Bog.',
+      'Micralis: Heat levels are off the chart. Stay moving.',
+      'Electroman: Vault signature found. Bouldereye is ahead.',
+      'Inspector Glowman: Eliminate Infix, then break the vault lock.',
+      'Mission: Rescue Bouldereye and extract.',
       'Press Space to start.',
     ]
     this.cutsceneLineIndex = 0
@@ -982,13 +1119,13 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private showCutscenePanel(line: string): void {
     if (!this.cutscenePanel || !this.cutsceneText) {
-      this.cutscenePanel = this.add.rectangle(480, 430, 900, 190, 0x07091b, 0.84)
-      this.cutscenePanel.setStrokeStyle(2, 0x8ab8ff, 0.95)
+      this.cutscenePanel = this.add.rectangle(480, 430, 900, 190, 0x120905, 0.84)
+      this.cutscenePanel.setStrokeStyle(2, 0xffb68a, 0.95)
       this.cutscenePanel.setDepth(60)
       this.cutscenePanel.setScrollFactor(0)
 
       this.cutsceneText = this.add.text(66, 360, '', {
-        color: '#f4f7ff',
+        color: '#fff4ea',
         fontSize: '24px',
         fontFamily: 'sans-serif',
         wordWrap: { width: 840 },
@@ -1019,16 +1156,28 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.cutscenePanel.setVisible(false)
     this.cutsceneText.setVisible(false)
 
+    if (this.dialogueOnEnd) {
+      const callback = this.dialogueOnEnd
+      this.dialogueOnEnd = null
+      callback()
+      return
+    }
+
     if (!this.rescueDone) {
-      this.statusMessage = 'Find Swirl Exanimo in the upper prism chamber.'
+      this.statusMessage = 'Find the vault chamber and rescue Bouldereye.'
     }
     this.updateUiText()
   }
 
+  private startDialogue(lines: string[], onEnd?: () => void): void {
+    this.cutsceneLines = lines
+    this.cutsceneLineIndex = 0
+    this.cutsceneActive = true
+    this.dialogueOnEnd = onEnd ?? null
+    this.showCutscenePanel(this.cutsceneLines[0])
+  }
+
   private updateUiText(): void {
-    if (!this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
-      this.miniBossDefeated = true
-    }
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
       [
@@ -1036,9 +1185,10 @@ export class LaserAlleyScene extends Phaser.Scene {
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
-        `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth} HP`}`,
-        `Swirl Exanimo: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
-        `Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
+        `Infix: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth} HP`}`,
+        `Illislim: ${this.illislimRescued ? 'Joined' : 'Missing'}`,
+        `Hurricano Man: ${this.hurricanoRescued ? 'Joined' : 'Missing'}`,
+        `Bouldereye: ${this.rescueDone ? 'Rescued' : 'Trapped'}`,
         this.statusMessage,
       ].join('\n'),
     )

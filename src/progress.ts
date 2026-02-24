@@ -8,6 +8,8 @@ export type GameProgress = {
   bloodyMapPiece: boolean
   swirlExanimoRescued: boolean
   lavaBogMap: boolean
+  bouldereyeRescued: boolean
+  lavaBogCleared: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -23,6 +25,8 @@ const defaultProgress: GameProgress = {
   bloodyMapPiece: false,
   swirlExanimoRescued: false,
   lavaBogMap: false,
+  bouldereyeRescued: false,
+  lavaBogCleared: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
