@@ -13,7 +13,7 @@ import { RockyCavernsScene } from './rocky-caverns'
 import { preloadSpriteAssets } from './sprite-assets'
 import { StageSelectScene } from './stage-select'
 import { HeroSelectScene } from './hero-select'
-import { LaserHillsStubScene } from './laser-hills-stub'
+import { LaserAlleyScene } from './laser-alley'
 
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
@@ -691,7 +691,7 @@ const config: Phaser.Types.Core.GameConfig = {
   parent: 'app',
   width: 960,
   height: 540,
-  scene: [IntroStoryScene, StageSelectScene, HeroSelectScene, LaserHillsStubScene, Stage1, RockyCavernsScene, BloodyHillsScene],
+  scene: [IntroStoryScene, StageSelectScene, HeroSelectScene, Stage1, RockyCavernsScene, BloodyHillsScene, LaserAlleyScene],
   physics: {
     default: 'arcade',
     arcade: {

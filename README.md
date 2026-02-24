@@ -6,7 +6,7 @@ A kid-created action platformer built with Phaser 3 + TypeScript.
 - Stage 1: Slippery Slopes
 - Stage 2: Rocky Caverns
 - Stage 3: Bloody Hills
-- Stage 4: Laser Hills (stub visible in stage select)
+- Stage 4: Laser Alley
 - Rescue heroes, clear exits, and progress through stages.
 
 ## Controls
@@ -16,7 +16,7 @@ A kid-created action platformer built with Phaser 3 + TypeScript.
 - `X`: Hero special (implemented for Hurricano Man as Gust Dash)
 - `X`: Hero special (baseline implementation for all listed heroes)
 - Stage Select: `1`, `2`, `3`
-- Stage Select: `4` opens Laser Hills stub
+- Stage Select: `4` opens Laser Alley
 - Hero Select: `Up/Down`, `Enter`, `Backspace`
 
 ## Current Hero System

@@ -29,6 +29,7 @@ export class HeroSelectScene extends Phaser.Scene {
   private detailText!: Phaser.GameObjects.Text
   private iconRect!: Phaser.GameObjects.Rectangle
   private iconSprite!: Phaser.GameObjects.Image
+  private controlsText!: Phaser.GameObjects.Text
 
   constructor() {
     super('hero-select')
@@ -55,6 +56,9 @@ export class HeroSelectScene extends Phaser.Scene {
       this.selectedIndex = 0
     }
 
+    const viewportH = this.scale.height
+    const compact = viewportH <= 560
+
     this.cameras.main.setBackgroundColor('#10121b')
 
     this.add.text(56, 44, 'Hero Select', {
@@ -72,32 +76,33 @@ export class HeroSelectScene extends Phaser.Scene {
     this.listText = this.add.text(56, 170, '', {
       color: '#dce7ff',
       fontFamily: 'sans-serif',
-      fontSize: '22px',
-      lineSpacing: 8,
+      fontSize: compact ? '20px' : '22px',
+      lineSpacing: compact ? 6 : 8,
     })
 
     this.iconRect = this.add.rectangle(590, 204, 96, 96, 0xffffff, 1)
     this.iconSprite = this.add.image(590, 204, '__WHITE')
     this.iconSprite.setVisible(false)
 
-    this.detailText = this.add.text(500, 280, '', {
+    this.detailText = this.add.text(500, compact ? 254 : 280, '', {
       color: '#f2f6ff',
       fontFamily: 'sans-serif',
-      fontSize: '20px',
-      lineSpacing: 8,
-      wordWrap: { width: 390 },
+      fontSize: compact ? '18px' : '20px',
+      lineSpacing: compact ? 4 : 8,
+      wordWrap: { width: compact ? 370 : 390 },
     })
 
-    this.add.text(
+    this.controlsText = this.add.text(
       56,
-      500,
+      viewportH - 34,
       'Up/Down: Select  Enter: Start  Backspace: Back',
       {
         color: '#b8c7e6',
         fontFamily: 'sans-serif',
-        fontSize: '20px',
+        fontSize: compact ? '16px' : '20px',
       },
     )
+    this.controlsText.setOrigin(0, 1)
 
     this.input.keyboard?.on('keydown-UP', () => {
       this.selectedIndex = (this.selectedIndex - 1 + this.heroIds.length) % this.heroIds.length
@@ -148,15 +153,12 @@ export class HeroSelectScene extends Phaser.Scene {
     this.detailText.setText(
       [
         `${selectedHero.displayName}`,
-        `Special: ${selectedHero.moves.special.name}`,
-        'Ability: Ready',
-        `Affinity: speed ${affinity.speedMul.toFixed(2)}x | damage ${affinity.damageMul.toFixed(2)}x | defense ${affinity.defenseMul.toFixed(2)}x`,
+        `Special: ${selectedHero.moves.special.name} (Ready)`,
+        `Affinity: SPD ${affinity.speedMul.toFixed(2)}x  DMG ${affinity.damageMul.toFixed(2)}x  DEF ${affinity.defenseMul.toFixed(2)}x`,
         '',
-        'Stats on this stage:',
-        `Speed: ${BASE_STATS.maxVelocityX.toFixed(0)} -> ${effective.maxVelocityX.toFixed(0)}`,
-        `Jump: ${BASE_STATS.jumpVelocity.toFixed(0)} -> ${effective.jumpVelocity.toFixed(0)}`,
-        `Damage: ${BASE_STATS.damage.toFixed(2)} -> ${effective.damage.toFixed(2)}`,
-        `Defense: ${BASE_STATS.defense.toFixed(2)} -> ${effective.defense.toFixed(2)}`,
+        'Stage stats:',
+        `Speed ${BASE_STATS.maxVelocityX.toFixed(0)} -> ${effective.maxVelocityX.toFixed(0)} | Jump ${BASE_STATS.jumpVelocity.toFixed(0)} -> ${effective.jumpVelocity.toFixed(0)}`,
+        `Damage ${BASE_STATS.damage.toFixed(2)} -> ${effective.damage.toFixed(2)} | Defense ${BASE_STATS.defense.toFixed(2)} -> ${effective.defense.toFixed(2)}`,
       ].join('\n'),
     )
   }
@@ -207,7 +209,7 @@ export class HeroSelectScene extends Phaser.Scene {
     const map: Record<StageId, string> = {
       SLIPPERY_HILLS: 'Slippery Slopes',
       ROCKY_CAVERNS: 'Rocky Caverns',
-      LASER_HILLS: 'Laser Hills',
+      LASER_HILLS: 'Laser Alley',
       ZOMBIE_MOUNTAINS: 'Zombie Mountains',
       LAVA_BOG: 'Lava Bog',
       BLOODY_HILLS: 'Bloody Hills',
@@ -225,6 +227,9 @@ export class HeroSelectScene extends Phaser.Scene {
     }
     if (gameProgress.bloodyMapPiece) {
       unlocked.add('HURRICANO_MAN')
+    }
+    if (gameProgress.swirlExanimoRescued) {
+      unlocked.add('SWIRL_EXANIMO')
     }
     return (Object.keys(HEROES) as HeroId[]).filter((heroId) => unlocked.has(heroId))
   }

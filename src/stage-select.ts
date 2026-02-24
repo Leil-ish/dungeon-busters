@@ -32,25 +32,25 @@ export class StageSelectScene extends Phaser.Scene {
       lineSpacing: 6,
     })
 
-    this.add.text(80, 428, 'Press 1 for Slippery Slopes, 2 for Rocky Caverns', {
+    this.add.text(80, 428, 'Press 1 for Slippery Slopes', {
       color: '#b2c5e9',
       fontFamily: 'sans-serif',
       fontSize: '18px',
     })
-    this.add.text(80, 452, 'Press 3 for Bloody Hills', {
+    this.add.text(80, 450, 'Press 2 for Rocky Caverns', {
       color: '#b2c5e9',
       fontFamily: 'sans-serif',
       fontSize: '18px',
     })
-    this.add.text(80, 476, 'Stage 4 (Stub): Laser Hills - Coming soon', {
-      color: '#8a96b3',
+    this.add.text(80, 472, 'Press 3 for Bloody Hills', {
+      color: '#b2c5e9',
       fontFamily: 'sans-serif',
-      fontSize: '17px',
+      fontSize: '18px',
     })
-    this.add.text(80, 498, 'Press 4 for Stage 4 stub', {
-      color: '#8a96b3',
+    this.add.text(80, 494, 'Press 4 for Laser Alley', {
+      color: '#b2c5e9',
       fontFamily: 'sans-serif',
-      fontSize: '17px',
+      fontSize: '18px',
     })
 
     this.statusText = this.add.text(80, 518, '', {
@@ -76,7 +76,14 @@ export class StageSelectScene extends Phaser.Scene {
         'bloody-hills',
       ),
     )
-    this.input.keyboard?.on('keydown-FOUR', () => this.scene.start('laser-hills-stub'))
+    this.input.keyboard?.on('keydown-FOUR', () =>
+      this.tryQueueStage(
+        gameProgress.bloodyMapPiece,
+        'Need Bloody Map Piece first.',
+        'LASER_HILLS',
+        'laser-alley',
+      ),
+    )
 
     this.refreshProgressText()
   }
@@ -89,7 +96,8 @@ export class StageSelectScene extends Phaser.Scene {
         `   Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Collected' : 'Missing'}`,
         `3. Stage 3: Bloody Hills    [Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'}]`,
         `   Bloody Map Piece: ${gameProgress.bloodyMapPiece ? 'Collected' : 'Missing'}`,
-        '4. Stage 4: Laser Hills (Stub)',
+        `4. Stage 4: Laser Alley    [Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'}]`,
+        `   Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Collected' : 'Missing'}`,
       ].join('\n'),
     )
     this.statusText.setText('Micralis is always available. Other heroes unlock by rescue progress.')

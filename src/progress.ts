@@ -6,6 +6,8 @@ export type GameProgress = {
   cavernMapPiece: boolean
   icemeckelRescued: boolean
   bloodyMapPiece: boolean
+  swirlExanimoRescued: boolean
+  lavaBogMap: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -19,6 +21,8 @@ const defaultProgress: GameProgress = {
   cavernMapPiece: false,
   icemeckelRescued: false,
   bloodyMapPiece: false,
+  swirlExanimoRescued: false,
+  lavaBogMap: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
