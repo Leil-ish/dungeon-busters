@@ -50,6 +50,7 @@ export class LavaBogScene extends Phaser.Scene {
 
   private shots!: Phaser.Physics.Arcade.Group
   private botShots!: Phaser.Physics.Arcade.Group
+  private bossMinions!: Phaser.Physics.Arcade.Group
   private staticPlatforms: Phaser.GameObjects.Rectangle[] = []
   private lavaZones: LavaZone[] = []
   private fallingDrips: FallingDrip[] = []
@@ -110,6 +111,7 @@ export class LavaBogScene extends Phaser.Scene {
   private speedBoostActive = false
   private allyLastShotAt = 0
   private readonly allyShotCooldownMs = 950
+  private bossLastActionAt = 0
 
   private playerMaxHealth = 10
   private playerHealth = 7
@@ -152,6 +154,7 @@ export class LavaBogScene extends Phaser.Scene {
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
+    const infixTexture = this.textures.exists('enemy-infix') ? 'enemy-infix' : enemyTexture
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
@@ -174,9 +177,8 @@ export class LavaBogScene extends Phaser.Scene {
     this.physics.add.collider(this.lavaBot, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.lavaBot, () => this.applyDamage(1, 'Lava Bot contact!'))
 
-    this.miniBoss = this.physics.add.sprite(2860, 470, enemyTexture)
+    this.miniBoss = this.physics.add.sprite(2860, 470, infixTexture)
     this.miniBoss.setScale(1.35)
-    this.miniBoss.setTint(0xff9b6a)
     this.miniBoss.setImmovable(true)
     this.miniBoss.setCollideWorldBounds(true)
     ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -416,6 +418,18 @@ export class LavaBogScene extends Phaser.Scene {
     this.physics.add.overlap(this.shots, this.miniBoss, (shotObj, enemyObj) => {
       this.handleMiniBossShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
     })
+    this.bossMinions = this.physics.add.group({ allowGravity: false, immovable: true, maxSize: 8 })
+    this.physics.add.overlap(this.shots, this.bossMinions, (shotObj, minionObj) => {
+      const shot = shotObj as Phaser.Physics.Arcade.Image
+      const minion = minionObj as Phaser.Physics.Arcade.Sprite
+      if (!minion.active) {
+        return
+      }
+      shot.disableBody(true, true)
+      minion.disableBody(true, true)
+      this.statusMessage = 'Minion down!'
+      this.updateUiText()
+    })
 
     this.botShots = this.physics.add.group({ allowGravity: false, maxSize: 10 })
     this.physics.add.collider(this.botShots, this.staticPlatforms, (obj1, obj2) => {
@@ -433,6 +447,8 @@ export class LavaBogScene extends Phaser.Scene {
       ;(shotCandidate as Phaser.Physics.Arcade.Image).disableBody(true, true)
     })
     this.physics.add.overlap(this.player, this.botShots, () => this.applyDamage(1, 'Molten shot hit!'))
+    this.physics.add.overlap(this.player, this.bossMinions, () => this.applyDamage(1, 'Infix minion hit!'))
+    this.physics.add.collider(this.bossMinions, this.staticPlatforms)
   }
 
   private createRescueObjects(): void {
@@ -541,6 +557,7 @@ export class LavaBogScene extends Phaser.Scene {
         'Press Space to begin the boss fight.',
       ],
       () => {
+        this.bossLastActionAt = this.time.now
         this.statusMessage = 'Boss fight started: Infix.'
         this.updateUiText()
       },
@@ -665,6 +682,85 @@ export class LavaBogScene extends Phaser.Scene {
     this.miniBoss.y = this.miniBossBaseY + Math.sin(this.time.now / 300) * 12
     this.miniBossLabel.setVisible(true)
     this.miniBossLabel.setPosition(this.miniBoss.x - 50, this.miniBoss.y - 56)
+
+    if (this.bossFightStarted && !this.cutsceneActive && this.time.now - this.bossLastActionAt > 1450) {
+      this.performBossAction()
+      this.bossLastActionAt = this.time.now
+    }
+  }
+
+  private performBossAction(): void {
+    if (!this.miniBoss.active || this.miniBossDefeated) {
+      return
+    }
+    const roll = Phaser.Math.Between(0, 99)
+    if (roll < 40) {
+      this.bossBurstAttack()
+      return
+    }
+    if (roll < 72) {
+      this.bossDashSweep()
+      return
+    }
+    this.bossSpawnMinion()
+  }
+
+  private bossBurstAttack(): void {
+    const baseDx = this.player.x - this.miniBoss.x
+    const baseDy = this.player.y - this.miniBoss.y
+    const baseAngle = Math.atan2(baseDy, baseDx)
+    const spread = [-0.35, -0.16, 0, 0.16, 0.35]
+    for (const delta of spread) {
+      const shot = this.botShots.get(this.miniBoss.x - 18, this.miniBoss.y - 12, 'laser-bot-shot') as
+        | Phaser.Physics.Arcade.Image
+        | null
+      if (!shot) {
+        continue
+      }
+      const a = baseAngle + delta
+      shot.enableBody(true, this.miniBoss.x - 18, this.miniBoss.y - 12, true, true)
+      shot.setActive(true)
+      shot.setVisible(true)
+      shot.setVelocity(Math.cos(a) * 250, Math.sin(a) * 250)
+      this.time.delayedCall(1800, () => shot.disableBody(true, true))
+    }
+    this.statusMessage = 'Infix: Burst volley!'
+    this.updateUiText()
+  }
+
+  private bossDashSweep(): void {
+    const dir = this.player.x >= this.miniBoss.x ? 1 : -1
+    const targetX = Phaser.Math.Clamp(this.miniBoss.x + dir * 220, 2520, 3050)
+    this.tweens.add({
+      targets: this.miniBoss,
+      x: targetX,
+      duration: 220,
+      ease: 'Sine.InOut',
+    })
+    this.statusMessage = 'Infix: Magma dash!'
+    this.updateUiText()
+  }
+
+  private bossSpawnMinion(): void {
+    const minion = this.bossMinions.get(this.miniBoss.x + Phaser.Math.Between(-70, 70), this.miniBoss.y + 26, 'enemy-scout') as
+      | Phaser.Physics.Arcade.Sprite
+      | null
+    if (!minion) {
+      return
+    }
+    minion.enableBody(true, minion.x, minion.y, true, true)
+    minion.setActive(true)
+    minion.setVisible(true)
+    minion.setCollideWorldBounds(true)
+    ;(minion.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    minion.setVelocityX(Phaser.Math.Between(-90, 90))
+    this.time.delayedCall(3200, () => {
+      if (minion.active) {
+        minion.disableBody(true, true)
+      }
+    })
+    this.statusMessage = 'Infix summoned minions!'
+    this.updateUiText()
   }
 
   private updatePatrolEnemy(): void {
