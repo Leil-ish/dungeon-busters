@@ -7,6 +7,7 @@ import {
   computeEffectivePlayerStats,
 } from './heroes'
 import { gameProgress } from './progress'
+import { preloadSpriteAssets } from './sprite-assets'
 
 type RockSpawnPoint = {
   x: number
@@ -27,7 +28,7 @@ export class RockyCavernsScene extends Phaser.Scene {
   private staticPlatforms: Phaser.GameObjects.Rectangle[] = []
 
   private rocks!: Phaser.Physics.Arcade.Group
-  private readonly maxRocks = 10
+  private readonly maxRocks = 8
   private readonly rockSpawnPoints: RockSpawnPoint[] = [
     { x: 600, y: 80 },
     { x: 980, y: 80 },
@@ -66,19 +67,29 @@ export class RockyCavernsScene extends Phaser.Scene {
   private readonly normalMaxVelocityX = 260
   private readonly playerSpawnX = 140
   private readonly playerSpawnY = 690
-  private readonly hitInvulnerabilityMs = 900
+  private readonly hitInvulnerabilityMs = 1300
   private readonly shotCooldownMs = 220
   private readonly shotSpeed = 520
   private readonly enemy1PatrolMinX = 1120
   private readonly enemy1PatrolMaxX = 1340
   private readonly enemy2PatrolMinX = 1890
   private readonly enemy2PatrolMaxX = 2130
-  private readonly enemyPatrolSpeed = 80
+  private readonly enemyPatrolSpeed = 58
   private readonly abilityCooldownMs = 1300
+  private abilityCooldownScale = 1
+  private shotCooldownScale = 1
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
   private lastAbilityAt = 0
+  private playerMaxHealth = 7
+  private playerHealth = 7
+  private checkpointX = 140
+  private checkpointY = 690
+  private healthPickup: Phaser.GameObjects.Rectangle | null = null
+  private powerPickup: Phaser.GameObjects.Rectangle | null = null
+  private damageReductionMul = 1
+  private speedBoostActive = false
 
   private statusMessage = 'Reach the stalactite chamber.'
   private readonly stageName = 'Stage 2: Rocky Caverns'
@@ -88,6 +99,10 @@ export class RockyCavernsScene extends Phaser.Scene {
 
   constructor() {
     super('rocky-caverns')
+  }
+
+  preload(): void {
+    preloadSpriteAssets(this)
   }
 
   create(): void {
@@ -125,6 +140,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.createEnemiesAndWeaponSystem()
     this.createFallingRocksHazard()
     this.createRescueObjects()
+    this.createCheckpointsAndItems()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
@@ -193,6 +209,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     }
 
     this.updateEnemyPatrols()
+    this.updateRescuedFollower()
     this.cleanupRocks()
   }
 
@@ -225,12 +242,12 @@ export class RockyCavernsScene extends Phaser.Scene {
       gfx.clear()
     }
 
-    if (!this.textures.exists('volcano-man')) {
+    if (!this.textures.exists('hero-volcano-man')) {
       gfx.fillStyle(0x7a4b2a, 1)
       gfx.fillRect(0, 0, 26, 46)
       gfx.fillStyle(0xb8302c, 1)
       gfx.fillRect(26, 0, 26, 46)
-      gfx.generateTexture('volcano-man', 52, 46)
+      gfx.generateTexture('hero-volcano-man', 52, 46)
       gfx.clear()
     }
 
@@ -248,12 +265,12 @@ export class RockyCavernsScene extends Phaser.Scene {
       gfx.clear()
     }
 
-    if (!this.textures.exists('hurricano-man')) {
+    if (!this.textures.exists('hero-hurricano-man')) {
       gfx.fillStyle(0x7bd8ff, 1)
       gfx.fillRect(0, 0, 20, 60)
       gfx.fillStyle(0xffffff, 0.9)
       gfx.fillRect(7, 0, 6, 60)
-      gfx.generateTexture('hurricano-man', 20, 60)
+      gfx.generateTexture('hero-hurricano-man', 20, 60)
     }
 
     gfx.destroy()
@@ -321,7 +338,8 @@ export class RockyCavernsScene extends Phaser.Scene {
   }
 
   private createEnemiesAndWeaponSystem(): void {
-    this.enemy1 = this.physics.add.sprite(this.enemy1PatrolMaxX, 598, 'enemy-block')
+    const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
+    this.enemy1 = this.physics.add.sprite(this.enemy1PatrolMaxX, 598, enemyTexture)
     this.enemy1.setCollideWorldBounds(true)
     this.enemy1.setImmovable(true)
     ;(this.enemy1.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -329,7 +347,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.physics.add.collider(this.enemy1, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.enemy1, () => this.handleEnemyHit())
 
-    this.enemy2 = this.physics.add.sprite(this.enemy2PatrolMaxX, 338, 'enemy-block')
+    this.enemy2 = this.physics.add.sprite(this.enemy2PatrolMaxX, 338, enemyTexture)
     this.enemy2.setCollideWorldBounds(true)
     this.enemy2.setImmovable(true)
     ;(this.enemy2.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -368,7 +386,7 @@ export class RockyCavernsScene extends Phaser.Scene {
   }
 
   private scheduleNextRockDrop(): void {
-    const delay = Phaser.Math.Between(1200, 2400)
+    const delay = Phaser.Math.Between(1700, 3000)
     this.nextRockTimer = this.time.delayedCall(delay, () => {
       if (!this.scene.isActive()) {
         return
@@ -402,8 +420,8 @@ export class RockyCavernsScene extends Phaser.Scene {
       rock.setActive(true)
       rock.setVisible(true)
       rock.enableBody(true, spawn.x, spawn.y, true, true)
-      rock.setGravityY(1250)
-      rock.setVelocity(Phaser.Math.Between(-20, 20), Phaser.Math.Between(90, 140))
+      rock.setGravityY(980)
+      rock.setVelocity(Phaser.Math.Between(-14, 14), Phaser.Math.Between(80, 120))
       rock.setBounce(0.05)
       rock.setAngularVelocity(Phaser.Math.Between(-120, 120))
     })
@@ -422,10 +440,66 @@ export class RockyCavernsScene extends Phaser.Scene {
     }
   }
 
+  private createCheckpointsAndItems(): void {
+    const defs: Array<[number, number]> = [
+      [1160, 610],
+      [2020, 350],
+    ]
+    defs.forEach(([x, y]) => {
+      const cp = this.add.rectangle(x, y, 20, 72, 0xffc76b, 0.9)
+      this.physics.add.existing(cp, true)
+      this.physics.add.overlap(this.player, cp, () => this.activateCheckpoint(cp, x, y))
+    })
+
+    this.healthPickup = this.add.rectangle(1460, 520, 24, 24, 0x7aff7a, 0.95)
+    this.physics.add.existing(this.healthPickup, true)
+    this.physics.add.overlap(this.player, this.healthPickup, () => {
+      if (!this.healthPickup) {
+        return
+      }
+      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 3)
+      this.healthPickup.destroy()
+      this.healthPickup = null
+      this.statusMessage = 'Health restored.'
+      this.playTone(560, 0.1)
+      this.updateUiText()
+    })
+
+    this.powerPickup = this.add.rectangle(1860, 330, 22, 22, 0x82e8ff, 0.95)
+    this.physics.add.existing(this.powerPickup, true)
+    this.physics.add.overlap(this.player, this.powerPickup, () => {
+      if (!this.powerPickup) {
+        return
+      }
+      this.shotCooldownScale = 0.85
+      this.abilityCooldownScale = 0.85
+      this.powerPickup.destroy()
+      this.powerPickup = null
+      this.statusMessage = 'Power core found. Cooldowns reduced.'
+      this.playTone(640, 0.1)
+      this.updateUiText()
+    })
+  }
+
+  private activateCheckpoint(checkpoint: Phaser.GameObjects.Rectangle, x: number, y: number): void {
+    if (checkpoint.getData('active')) {
+      return
+    }
+
+    this.checkpointX = x
+    this.checkpointY = y - 24
+    checkpoint.setData('active', true)
+    checkpoint.setFillStyle(0x8affc1, 1)
+    this.statusMessage = 'Checkpoint reached.'
+    this.playTone(500, 0.08)
+    this.updateUiText()
+  }
+
   private createRescueObjects(): void {
     this.stalactite = this.add.rectangle(2210, 150, 90, 160, 0x6c6f78)
 
-    this.volcanoMan = this.physics.add.sprite(2210, 155, 'volcano-man')
+    const volcanoTexture = this.textures.exists('hero-volcano-man') ? 'hero-volcano-man' : 'player-block'
+    this.volcanoMan = this.physics.add.sprite(2210, 155, volcanoTexture)
     this.volcanoMan.setVisible(false)
     this.volcanoMan.disableBody(true, true)
 
@@ -493,37 +567,33 @@ export class RockyCavernsScene extends Phaser.Scene {
   }
 
   private handleRockHit(): void {
-    if (this.isPlayerInvulnerable || this.cutsceneActive) {
-      return
-    }
-
-    this.isPlayerInvulnerable = true
-    this.player.setPosition(this.playerSpawnX, this.playerSpawnY)
-    this.player.setVelocity(0, 0)
-    this.player.setAccelerationX(0)
-    this.player.setTint(0xffb5b5)
-    this.statusMessage = 'Rock hit! Watch the ceiling.'
-    this.updateUiText()
-
-    const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
-    this.time.delayedCall(this.hitInvulnerabilityMs * defenseScale, () => {
-      this.isPlayerInvulnerable = false
-      this.player.clearTint()
-    })
+    this.applyDamage(1, 'Rock hit! Watch the ceiling.')
   }
 
   private handleEnemyHit(): void {
+    this.applyDamage(1, 'Enemy hit! Try again.')
+  }
+
+  private applyDamage(amount: number, message: string): void {
     if (this.isPlayerInvulnerable || this.cutsceneActive) {
       return
     }
 
+    this.playerHealth = Math.max(0, this.playerHealth - amount * this.damageReductionMul)
     this.isPlayerInvulnerable = true
-    this.player.setPosition(this.playerSpawnX, this.playerSpawnY)
-    this.player.setVelocity(0, 0)
-    this.player.setAccelerationX(0)
     this.player.setTint(0xffb5b5)
-    this.statusMessage = 'Enemy hit! Try again.'
+    this.statusMessage = message
     this.updateUiText()
+    this.playTone(220, 0.09)
+
+    if (this.playerHealth <= 0) {
+      this.playerHealth = this.playerMaxHealth
+      this.player.setPosition(this.checkpointX, this.checkpointY)
+      this.player.setVelocity(0, 0)
+      this.player.setAccelerationX(0)
+      this.statusMessage = 'Respawned at checkpoint.'
+      this.updateUiText()
+    }
 
     const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
     this.time.delayedCall(this.hitInvulnerabilityMs * defenseScale, () => {
@@ -534,7 +604,7 @@ export class RockyCavernsScene extends Phaser.Scene {
 
   private fireShot(): void {
     const now = this.time.now
-    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs) {
+    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs * this.shotCooldownScale) {
       return
     }
 
@@ -550,6 +620,7 @@ export class RockyCavernsScene extends Phaser.Scene {
     shot.setVisible(true)
     shot.enableBody(true, shot.x, shot.y, true, true)
     shot.setVelocityX(this.facingDir * this.effectiveStats.shotSpeed)
+    this.playTone(460, 0.05)
     this.time.delayedCall(900, () => shot.disableBody(true, true))
   }
 
@@ -565,33 +636,102 @@ export class RockyCavernsScene extends Phaser.Scene {
   }
 
   private tryUseHeroAbility(): void {
-    if (this.selectedHero.specialAbility !== 'GUST_DASH') {
-      this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
-      this.updateUiText()
-      return
-    }
-
     const now = this.time.now
-    if (now - this.lastAbilityAt < this.abilityCooldownMs) {
+    if (now - this.lastAbilityAt < this.abilityCooldownMs * this.abilityCooldownScale) {
       return
     }
 
     this.lastAbilityAt = now
-    this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-    const enemies = [this.enemy1, this.enemy2]
-    for (const enemy of enemies) {
-      if (!enemy.active) {
-        continue
-      }
-
-      const dx = enemy.x - this.player.x
-      const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
-      if (inFront && Math.abs(dx) < 180) {
-        enemy.setVelocityX(this.facingDir * 180)
+    const pushEnemies = (): void => {
+      for (const enemy of [this.enemy1, this.enemy2]) {
+        if (!enemy.active) {
+          continue
+        }
+        const dx = enemy.x - this.player.x
+        const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+        if (inFront && Math.abs(dx) < 190) {
+          enemy.setVelocityX(this.facingDir * 190)
+        }
       }
     }
 
-    this.statusMessage = 'Gust Dash!'
+    switch (this.selectedHero.specialAbility) {
+      case 'GUST_DASH':
+      case 'PHOTON_DASH':
+      case 'THUNDER_SLIDE':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
+        pushEnemies()
+        this.statusMessage = `${this.selectedHero.moves.special.name}!`
+        this.playTone(680, 0.07)
+        break
+      case 'RADIANT_BARRIER':
+        this.damageReductionMul = 0.45
+        this.player.setTint(0xc6f6ff)
+        this.time.delayedCall(2200, () => {
+          this.damageReductionMul = 1
+          this.player.clearTint()
+        })
+        this.statusMessage = 'Radiant Barrier active.'
+        this.playTone(520, 0.1)
+        break
+      case 'FREEZE_PATCH': {
+        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 180, 24, 0xb8f5ff, 0.55)
+        const patchRect = new Phaser.Geom.Rectangle(this.player.x - 90, this.player.y + 36, 180, 24)
+        const timer = this.time.addEvent({
+          delay: 70,
+          repeat: 28,
+          callback: () => {
+            for (const enemy of [this.enemy1, this.enemy2]) {
+              const body = enemy.body as Phaser.Physics.Arcade.Body | null
+              if (enemy.active && body && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
+                enemy.setVelocityX(body.velocity.x * 0.82)
+              }
+            }
+          },
+        })
+        this.time.delayedCall(2200, () => {
+          timer.remove(false)
+          patch.destroy()
+        })
+        this.statusMessage = 'Freeze Patch deployed.'
+        this.playTone(410, 0.1)
+        break
+      }
+      case 'MOLTEN_TRAIL': {
+        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
+        this.physics.add.existing(trail, true)
+        this.physics.add.overlap(trail, this.enemy1, () => this.enemy1.disableBody(true, true))
+        this.physics.add.overlap(trail, this.enemy2, () => this.enemy2.disableBody(true, true))
+        this.time.delayedCall(2200, () => trail.destroy())
+        this.statusMessage = 'Molten Trail ignited.'
+        this.playTone(320, 0.09)
+        break
+      }
+      case 'FUSION_WAVE':
+        if (!this.speedBoostActive) {
+          this.speedBoostActive = true
+          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 80, 900)
+          this.time.delayedCall(2600, () => {
+            this.speedBoostActive = false
+            this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+          })
+        }
+        this.statusMessage = 'Fusion Wave boost active.'
+        this.playTone(740, 0.1)
+        break
+      case 'ABSORB':
+        this.damageReductionMul = 0.6
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+        this.time.delayedCall(2600, () => {
+          this.damageReductionMul = 1
+        })
+        this.statusMessage = 'Absorb active. Defense boosted.'
+        this.playTone(380, 0.1)
+        break
+      default:
+        this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
+    }
+
     this.updateUiText()
   }
 
@@ -611,6 +751,18 @@ export class RockyCavernsScene extends Phaser.Scene {
         this.enemy2.setVelocityX(-this.enemyPatrolSpeed)
       }
     }
+  }
+
+  private updateRescuedFollower(): void {
+    if (!this.rescueDone || !this.volcanoMan.active) {
+      return
+    }
+
+    const targetX = this.player.x - this.facingDir * 60
+    const targetY = this.player.y
+    const followLerp = 0.08
+    this.volcanoMan.x = Phaser.Math.Linear(this.volcanoMan.x, targetX, followLerp)
+    this.volcanoMan.y = Phaser.Math.Linear(this.volcanoMan.y, targetY, followLerp)
   }
 
   private initializeIntroCutscene(): void {
@@ -671,16 +823,34 @@ export class RockyCavernsScene extends Phaser.Scene {
   }
 
   private updateUiText(): void {
+    const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
       [
         'Dungeon Busters',
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
+        `HP: ${hp}`,
         `Volcano Man: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
         this.statusMessage,
       ].join('\n'),
     )
+  }
+
+  private playTone(freq: number, durationSec = 0.06): void {
+    const ctx = (this.sound as unknown as { context?: AudioContext }).context
+    if (!ctx) {
+      return
+    }
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.value = freq
+    gain.gain.value = 0.025
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start()
+    oscillator.stop(ctx.currentTime + durationSec)
   }
 
   private createStaticPlatform(

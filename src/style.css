@@ -1,16 +1,32 @@
 html,
 body,
 #app {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100dvh;
   margin: 0;
 }
 
+html,
 body {
   overflow: hidden;
+}
+
+body {
   background: #0b0e18;
+  min-height: 100vh;
+}
+
+#app {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 canvas {
   display: block;
+  max-width: 100vw;
+  max-height: 100dvh;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }

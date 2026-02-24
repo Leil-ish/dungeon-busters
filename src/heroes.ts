@@ -10,10 +10,10 @@ export type HeroId =
   | 'MICRALIS'
   | 'ELECTROMAN'
   | 'INSPECTOR_GLOWMAN'
-  | 'ISEMICAL'
+  | 'ICEMECKEL'
   | 'VOLCANO_MAN'
   | 'SWIRL_EXANIMO'
-  | 'STILKFOWLNO'
+  | 'ILLISLIM'
   | 'HURRICANO_MAN'
 
 export type HeroAbilityId =
@@ -107,7 +107,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   MICRALIS: {
     id: 'MICRALIS',
     displayName: 'Micralis',
-    textureKey: 'player-block',
+    textureKey: 'hero-micralis',
     specialAbility: 'PHOTON_DASH',
     superAbility: 'OVERDRIVE_CANNON',
     tuning: { speedMul: 1.0, jumpMul: 1.0, damageMul: 1.0, defenseMul: 1.0, cooldownMul: 1.0, shotSpeedMul: 1.0 },
@@ -148,7 +148,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   ELECTROMAN: {
     id: 'ELECTROMAN',
     displayName: 'Electroman',
-    textureKey: 'player-block',
+    textureKey: 'hero-electroman',
     specialAbility: 'THUNDER_SLIDE',
     superAbility: 'STORM_BURST',
     tuning: { speedMul: 1.03, jumpMul: 1.01, damageMul: 1.02, defenseMul: 0.96, cooldownMul: 0.95, shotSpeedMul: 1.05 },
@@ -189,7 +189,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   INSPECTOR_GLOWMAN: {
     id: 'INSPECTOR_GLOWMAN',
     displayName: 'Inspector Glowman',
-    textureKey: 'player-block',
+    textureKey: 'hero-glowman',
     specialAbility: 'RADIANT_BARRIER',
     superAbility: 'SOLAR_FLARE',
     tuning: { speedMul: 0.97, jumpMul: 0.99, damageMul: 1.0, defenseMul: 1.1, cooldownMul: 1.03, shotSpeedMul: 0.98 },
@@ -225,10 +225,10 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
       },
     },
   },
-  ISEMICAL: {
-    id: 'ISEMICAL',
-    displayName: 'Isemical',
-    textureKey: 'icemeckel',
+  ICEMECKEL: {
+    id: 'ICEMECKEL',
+    displayName: 'Icemeckel',
+    textureKey: 'hero-icemeckel',
     specialAbility: 'FREEZE_PATCH',
     superAbility: 'GLACIAL_LOCKDOWN',
     tuning: { speedMul: 1.0, jumpMul: 1.02, damageMul: 0.98, defenseMul: 1.05, cooldownMul: 1.0, shotSpeedMul: 0.97 },
@@ -267,7 +267,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   VOLCANO_MAN: {
     id: 'VOLCANO_MAN',
     displayName: 'Volcano Man',
-    textureKey: 'volcano-man',
+    textureKey: 'hero-volcano-man',
     specialAbility: 'MOLTEN_TRAIL',
     superAbility: 'VOLCANIC_ERUPTION',
     tuning: { speedMul: 0.94, jumpMul: 0.96, damageMul: 1.12, defenseMul: 1.03, cooldownMul: 1.05, shotSpeedMul: 0.95 },
@@ -306,7 +306,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   SWIRL_EXANIMO: {
     id: 'SWIRL_EXANIMO',
     displayName: 'Swirl Exanimo',
-    textureKey: 'player-block', // TODO: add dedicated visual
+    textureKey: 'hero-swirl-exanimo',
     specialAbility: 'FUSION_WAVE',
     superAbility: 'ELEMENTAL_SPIRAL',
     tuning: { speedMul: 1.03, jumpMul: 1.04, damageMul: 1.01, defenseMul: 0.99, cooldownMul: 1.18, shotSpeedMul: 1.02 },
@@ -342,10 +342,10 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
       },
     },
   },
-  STILKFOWLNO: {
-    id: 'STILKFOWLNO',
-    displayName: 'Stilkfowlno',
-    textureKey: 'player-block', // TODO: add dedicated visual
+  ILLISLIM: {
+    id: 'ILLISLIM',
+    displayName: 'Illislim',
+    textureKey: 'hero-illislim',
     specialAbility: 'ABSORB',
     superAbility: 'SLIME_DOMINION',
     tuning: { speedMul: 0.98, jumpMul: 0.98, damageMul: 0.9, defenseMul: 1.12, cooldownMul: 1.03, shotSpeedMul: 0.96 },
@@ -384,7 +384,7 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   HURRICANO_MAN: {
     id: 'HURRICANO_MAN',
     displayName: 'Hurricano Man',
-    textureKey: 'hurricano-man',
+    textureKey: 'hero-hurricano-man',
     specialAbility: 'GUST_DASH',
     superAbility: 'HURRICANE_SURGE',
     tuning: { speedMul: 1.06, jumpMul: 1.06, damageMul: 0.95, defenseMul: 0.92, cooldownMul: 0.93, shotSpeedMul: 1.08 },

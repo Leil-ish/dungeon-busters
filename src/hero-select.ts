@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import {
   DEFAULT_HERO_ID,
   HEROES,
+  type StageId,
   type HeroDefinition,
   type HeroId,
   type RuntimePlayerStats,
@@ -20,7 +21,7 @@ const BASE_STATS: RuntimePlayerStats = {
 }
 
 export class HeroSelectScene extends Phaser.Scene {
-  private heroIds: HeroId[] = Object.keys(HEROES) as HeroId[]
+  private heroIds: HeroId[] = []
   private selectedIndex = 0
 
   private listText!: Phaser.GameObjects.Text
@@ -40,8 +41,13 @@ export class HeroSelectScene extends Phaser.Scene {
       return
     }
 
+    this.heroIds = this.getUnlockedHeroIds()
+
     const savedIndex = this.heroIds.indexOf(gameProgress.selectedHeroId)
     this.selectedIndex = savedIndex >= 0 ? savedIndex : this.heroIds.indexOf(DEFAULT_HERO_ID)
+    if (this.selectedIndex < 0) {
+      this.selectedIndex = 0
+    }
 
     this.cameras.main.setBackgroundColor('#10121b')
 
@@ -51,7 +57,7 @@ export class HeroSelectScene extends Phaser.Scene {
       fontSize: '52px',
     })
 
-    this.add.text(58, 110, `Stage: ${pendingStageId}`, {
+    this.add.text(58, 110, `Stage: ${this.friendlyStageName(pendingStageId)}`, {
       color: '#9ec9ff',
       fontFamily: 'sans-serif',
       fontSize: '24px',
@@ -115,7 +121,6 @@ export class HeroSelectScene extends Phaser.Scene {
     const selectedHero = HEROES[this.heroIds[this.selectedIndex]]
     const effective = computeEffectivePlayerStats(selectedHero.id, stageId, BASE_STATS)
     const affinity = selectedHero.affinity[stageId]
-    const implementedSpecial = selectedHero.moves.special.implementation === 'implemented'
 
     this.iconRect.setFillStyle(this.heroColor(selectedHero.id), 1)
 
@@ -123,7 +128,7 @@ export class HeroSelectScene extends Phaser.Scene {
       [
         `${selectedHero.displayName}`,
         `Special: ${selectedHero.moves.special.name}`,
-        implementedSpecial ? 'Ability: Ready' : 'Ability: Coming soon',
+        'Ability: Ready',
         `Affinity: speed ${affinity.speedMul.toFixed(2)}x | damage ${affinity.damageMul.toFixed(2)}x | defense ${affinity.defenseMul.toFixed(2)}x`,
         '',
         'Stats on this stage:',
@@ -166,13 +171,39 @@ export class HeroSelectScene extends Phaser.Scene {
       MICRALIS: 0x8ec5ff,
       ELECTROMAN: 0xf4d35e,
       INSPECTOR_GLOWMAN: 0xe2f3ff,
-      ISEMICAL: 0x9edfff,
+      ICEMECKEL: 0x9edfff,
       VOLCANO_MAN: 0xd86539,
       SWIRL_EXANIMO: 0xd5a9ff,
-      STILKFOWLNO: 0x8ed8a6,
+      ILLISLIM: 0x8ed8a6,
       HURRICANO_MAN: 0x79f0ff,
     }
 
     return map[heroId]
+  }
+
+  private friendlyStageName(stageId: StageId): string {
+    const map: Record<StageId, string> = {
+      SLIPPERY_HILLS: 'Slippery Slopes',
+      ROCKY_CAVERNS: 'Rocky Caverns',
+      LASER_HILLS: 'Laser Hills',
+      ZOMBIE_MOUNTAINS: 'Zombie Mountains',
+      LAVA_BOG: 'Lava Bog',
+      BLOODY_HILLS: 'Bloody Hills',
+    }
+    return map[stageId]
+  }
+
+  private getUnlockedHeroIds(): HeroId[] {
+    const unlocked = new Set<HeroId>(['MICRALIS', 'ELECTROMAN', 'INSPECTOR_GLOWMAN'])
+    if (gameProgress.volcanoManRescued) {
+      unlocked.add('VOLCANO_MAN')
+    }
+    if (gameProgress.icemeckelRescued) {
+      unlocked.add('ICEMECKEL')
+    }
+    if (gameProgress.bloodyMapPiece) {
+      unlocked.add('HURRICANO_MAN')
+    }
+    return (Object.keys(HEROES) as HeroId[]).filter((heroId) => unlocked.has(heroId))
   }
 }

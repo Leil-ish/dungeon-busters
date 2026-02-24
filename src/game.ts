@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { BloodyHillsScene } from './bloody-hills'
+import { IntroStoryScene } from './intro-story'
 import {
   DEFAULT_HERO_ID,
   HEROES,
@@ -9,8 +10,10 @@ import {
 } from './heroes'
 import { gameProgress } from './progress'
 import { RockyCavernsScene } from './rocky-caverns'
+import { preloadSpriteAssets } from './sprite-assets'
 import { StageSelectScene } from './stage-select'
 import { HeroSelectScene } from './hero-select'
+import { LaserHillsStubScene } from './laser-hills-stub'
 
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
@@ -45,10 +48,20 @@ class Stage1 extends Phaser.Scene {
   })
   private readonly abilityCooldownMs = 1300
   private lastAbilityAt = 0
+  private abilityCooldownScale = 1
+  private shotCooldownScale = 1
   private playerHasKey = false
   private stageClearTriggered = false
   private statusMessage = 'Find the Torrent Key Piece.'
-  private readonly stageName = 'Stage 1: Slippery Hills'
+  private readonly stageName = 'Stage 1: Slippery Slopes'
+  private playerMaxHealth = 7
+  private playerHealth = 5
+  private checkpointX = 140
+  private checkpointY = 680
+  private healthPickup: Phaser.GameObjects.Rectangle | null = null
+  private powerPickup: Phaser.GameObjects.Rectangle | null = null
+  private damageReductionMul = 1
+  private speedBoostActive = false
 
   private readonly normalDragX = 900
   private readonly slipperyDragX = 180
@@ -59,11 +72,11 @@ class Stage1 extends Phaser.Scene {
   private readonly playerSpawnY = 680
   private readonly enemyPatrolMinX = 640
   private readonly enemyPatrolMaxX = 900
-  private readonly enemyPatrolSpeed = 90
+  private readonly enemyPatrolSpeed = 62
   private readonly enemy2PatrolMinX = 2270
   private readonly enemy2PatrolMaxX = 2370
-  private readonly enemy2PatrolSpeed = 70
-  private readonly hitInvulnerabilityMs = 1000
+  private readonly enemy2PatrolSpeed = 52
+  private readonly hitInvulnerabilityMs = 1350
   private readonly shotCooldownMs = 220
   private readonly shotSpeed = 520
   private isPlayerInvulnerable = false
@@ -72,6 +85,10 @@ class Stage1 extends Phaser.Scene {
 
   constructor() {
     super('stage1')
+  }
+
+  preload(): void {
+    preloadSpriteAssets(this)
   }
 
   create(): void {
@@ -129,7 +146,7 @@ class Stage1 extends Phaser.Scene {
     gfx.fillRect(0, 0, 20, 60)
     gfx.fillStyle(0xffffff, 0.9)
     gfx.fillRect(7, 0, 6, 60)
-    gfx.generateTexture('hurricano-man', 20, 60)
+    gfx.generateTexture('hero-hurricano-man', 20, 60)
     gfx.clear()
     gfx.fillStyle(0x12293d, 1)
     gfx.fillRect(0, 0, 64, 64)
@@ -146,6 +163,7 @@ class Stage1 extends Phaser.Scene {
     this.waterfallBackdrop.setDepth(-20)
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
+    const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
@@ -154,7 +172,7 @@ class Stage1 extends Phaser.Scene {
 
     this.physics.add.collider(this.player, this.staticPlatforms)
 
-    this.enemy = this.physics.add.sprite(this.enemyPatrolMaxX, 698, 'enemy-block')
+    this.enemy = this.physics.add.sprite(this.enemyPatrolMaxX, 698, enemyTexture)
     this.enemy.setCollideWorldBounds(true)
     this.enemy.setImmovable(true)
     ;(this.enemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -163,7 +181,7 @@ class Stage1 extends Phaser.Scene {
     this.physics.add.collider(this.enemy, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.enemy, () => this.handleEnemyHit())
 
-    this.enemy2 = this.physics.add.sprite(this.enemy2PatrolMaxX, 316, 'enemy-block')
+    this.enemy2 = this.physics.add.sprite(this.enemy2PatrolMaxX, 316, enemyTexture)
     this.enemy2.setCollideWorldBounds(true)
     this.enemy2.setImmovable(true)
     ;(this.enemy2.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -175,8 +193,21 @@ class Stage1 extends Phaser.Scene {
       allowGravity: false,
       maxSize: 10,
     })
-    this.physics.add.collider(this.shots, this.staticPlatforms, (shotObj) => {
-      const shot = shotObj as Phaser.Physics.Arcade.Image
+    this.physics.add.collider(this.shots, this.staticPlatforms, (obj1, obj2) => {
+      const maybeShot1 = obj1 as unknown as { texture?: { key?: string } }
+      const maybeShot2 = obj2 as unknown as { texture?: { key?: string } }
+      const shotCandidate =
+        maybeShot1.texture?.key === 'electro-shot'
+          ? (obj1 as Phaser.GameObjects.GameObject)
+          : maybeShot2.texture?.key === 'electro-shot'
+            ? (obj2 as Phaser.GameObjects.GameObject)
+            : null
+
+      if (!shotCandidate) {
+        return
+      }
+
+      const shot = shotCandidate as Phaser.Physics.Arcade.Image
       shot.disableBody(true, true)
     })
     this.physics.add.overlap(this.shots, this.enemy, (shotObj, enemyObj) => {
@@ -197,6 +228,7 @@ class Stage1 extends Phaser.Scene {
 
     this.exitDoor = this.add.rectangle(worldWidth - 120, worldHeight - 150, 54, 140, 0x7e5cff)
     this.physics.add.existing(this.exitDoor, true)
+    this.createCheckpointsAndItems()
 
     this.physics.add.overlap(this.player, this.keyPiece, () => {
       if (!this.keyPiece || this.playerHasKey) {
@@ -208,6 +240,7 @@ class Stage1 extends Phaser.Scene {
       this.keyPiece.destroy()
       this.keyPiece = null
       this.statusMessage = 'Torrent Key Piece collected.'
+      this.playTone(720, 0.12)
       this.updateUiText()
     })
 
@@ -251,10 +284,13 @@ class Stage1 extends Phaser.Scene {
 
     if (isInSlipperyZone) {
       this.player.setDragX(this.slipperyDragX)
-      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX * (this.slipperyMaxVelocityX / this.normalMaxVelocityX), 900)
+      this.player.setMaxVelocity(
+        this.effectiveStats.maxVelocityX * (this.slipperyMaxVelocityX / this.normalMaxVelocityX) + (this.speedBoostActive ? 80 : 0),
+        900,
+      )
     } else {
       this.player.setDragX(this.normalDragX)
-      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + (this.speedBoostActive ? 80 : 0), 900)
     }
 
     if (this.cursors.left.isDown) {
@@ -319,6 +355,62 @@ class Stage1 extends Phaser.Scene {
     return new Phaser.Geom.Rectangle(centerX - width / 2, centerY - height / 2, width, height)
   }
 
+  private createCheckpointsAndItems(): void {
+    const checkpointDefs: Array<[number, number]> = [
+      [900, 700],
+      [2020, 500],
+    ]
+
+    checkpointDefs.forEach(([x, y]) => {
+      const flag = this.add.rectangle(x, y, 20, 72, 0xffc76b, 0.9)
+      this.physics.add.existing(flag, true)
+      this.physics.add.overlap(this.player, flag, () => this.activateCheckpoint(flag, x, y))
+    })
+
+    this.healthPickup = this.add.rectangle(1180, 790, 24, 24, 0x7aff7a, 0.95)
+    this.physics.add.existing(this.healthPickup, true)
+    this.physics.add.overlap(this.player, this.healthPickup, () => {
+      if (!this.healthPickup) {
+        return
+      }
+      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 3)
+      this.healthPickup.destroy()
+      this.healthPickup = null
+      this.statusMessage = 'Health restored.'
+      this.playTone(560, 0.1)
+      this.updateUiText()
+    })
+
+    this.powerPickup = this.add.rectangle(1840, 705, 22, 22, 0x82e8ff, 0.95)
+    this.physics.add.existing(this.powerPickup, true)
+    this.physics.add.overlap(this.player, this.powerPickup, () => {
+      if (!this.powerPickup) {
+        return
+      }
+      this.shotCooldownScale = 0.85
+      this.abilityCooldownScale = 0.85
+      this.powerPickup.destroy()
+      this.powerPickup = null
+      this.statusMessage = 'Power core found. Ability cooldown boosted.'
+      this.playTone(640, 0.1)
+      this.updateUiText()
+    })
+  }
+
+  private activateCheckpoint(flag: Phaser.GameObjects.Rectangle, x: number, y: number): void {
+    if (flag.getData('active')) {
+      return
+    }
+
+    this.checkpointX = x
+    this.checkpointY = y - 24
+    flag.setData('active', true)
+    flag.setFillStyle(0x8affc1, 1)
+    this.statusMessage = 'Checkpoint reached.'
+    this.playTone(500, 0.08)
+    this.updateUiText()
+  }
+
   private createStaticPlatform(
     centerX: number,
     centerY: number,
@@ -332,23 +424,36 @@ class Stage1 extends Phaser.Scene {
   }
 
   private updateUiText(): void {
+    const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
-      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
+      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nHP: ${hp}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
     )
   }
 
   private handleEnemyHit(): void {
+    this.applyDamage(1, 'Oof! Try again.')
+  }
+
+  private applyDamage(amount: number, message: string): void {
     if (this.isPlayerInvulnerable) {
       return
     }
 
+    this.playerHealth = Math.max(0, this.playerHealth - amount * this.damageReductionMul)
     this.isPlayerInvulnerable = true
-    this.player.setPosition(this.playerSpawnX, this.playerSpawnY)
-    this.player.setVelocity(0, 0)
-    this.player.setAccelerationX(0)
     this.player.setTint(0xff9f9f)
-    this.statusMessage = 'Oof! Try again.'
+    this.statusMessage = message
     this.updateUiText()
+    this.playTone(220, 0.09)
+
+    if (this.playerHealth <= 0) {
+      this.playerHealth = this.playerMaxHealth
+      this.player.setPosition(this.checkpointX, this.checkpointY)
+      this.player.setVelocity(0, 0)
+      this.player.setAccelerationX(0)
+      this.statusMessage = 'Respawned at checkpoint.'
+      this.updateUiText()
+    }
 
     const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
     const invulnMs = this.hitInvulnerabilityMs * defenseScale
@@ -360,7 +465,7 @@ class Stage1 extends Phaser.Scene {
 
   private fireShot(): void {
     const now = this.time.now
-    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs) {
+    if (now - this.lastShotAt < this.effectiveStats.shotCooldownMs * this.shotCooldownScale) {
       return
     }
 
@@ -376,6 +481,7 @@ class Stage1 extends Phaser.Scene {
     shot.setVisible(true)
     shot.enableBody(true, shot.x, shot.y, true, true)
     shot.setVelocityX(this.facingDir * this.effectiveStats.shotSpeed)
+    this.playTone(460, 0.05)
     this.time.delayedCall(900, () => shot.disableBody(true, true))
   }
 
@@ -398,34 +504,122 @@ class Stage1 extends Phaser.Scene {
   }
 
   private tryUseHeroAbility(): void {
-    if (this.selectedHero.specialAbility !== 'GUST_DASH') {
-      this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
-      this.updateUiText()
-      return
-    }
-
     const now = this.time.now
-    if (now - this.lastAbilityAt < this.abilityCooldownMs) {
+    if (now - this.lastAbilityAt < this.abilityCooldownMs * this.abilityCooldownScale) {
       return
     }
 
     this.lastAbilityAt = now
-    this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-    const enemies = [this.enemy, this.enemy2]
-    for (const enemy of enemies) {
-      if (!enemy.active) {
-        continue
-      }
+    const pushEnemies = (): void => {
+      const enemies = [this.enemy, this.enemy2]
+      for (const enemy of enemies) {
+        if (!enemy.active) {
+          continue
+        }
 
-      const dx = enemy.x - this.player.x
-      const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
-      if (inFront && Math.abs(dx) < 180) {
-        enemy.setVelocityX(this.facingDir * 180)
+        const dx = enemy.x - this.player.x
+        const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+        if (inFront && Math.abs(dx) < 190) {
+          enemy.setVelocityX(this.facingDir * 190)
+        }
       }
     }
 
-    this.statusMessage = 'Gust Dash!'
+    switch (this.selectedHero.specialAbility) {
+      case 'GUST_DASH':
+      case 'PHOTON_DASH':
+      case 'THUNDER_SLIDE':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
+        pushEnemies()
+        this.statusMessage = `${this.selectedHero.moves.special.name}!`
+        this.playTone(680, 0.07)
+        break
+      case 'RADIANT_BARRIER':
+        this.damageReductionMul = 0.45
+        this.player.setTint(0xc6f6ff)
+        this.time.delayedCall(2200, () => {
+          this.damageReductionMul = 1
+          this.player.clearTint()
+        })
+        this.statusMessage = 'Radiant Barrier active.'
+        this.playTone(520, 0.1)
+        break
+      case 'FREEZE_PATCH': {
+        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 180, 24, 0xb8f5ff, 0.55)
+        this.physics.add.existing(patch, true)
+        const patchRect = new Phaser.Geom.Rectangle(this.player.x - 90, this.player.y + 36, 180, 24)
+        const timer = this.time.addEvent({
+          delay: 70,
+          repeat: 28,
+          callback: () => {
+            for (const enemy of [this.enemy, this.enemy2]) {
+              const body = enemy.body as Phaser.Physics.Arcade.Body | null
+              if (enemy.active && body && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
+                enemy.setVelocityX(body.velocity.x * 0.82)
+              }
+            }
+          },
+        })
+        this.time.delayedCall(2200, () => {
+          timer.remove(false)
+          patch.destroy()
+        })
+        this.statusMessage = 'Freeze Patch deployed.'
+        this.playTone(410, 0.1)
+        break
+      }
+      case 'MOLTEN_TRAIL': {
+        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
+        this.physics.add.existing(trail, true)
+        this.physics.add.overlap(trail, this.enemy, () => this.enemy.disableBody(true, true))
+        this.physics.add.overlap(trail, this.enemy2, () => this.enemy2.disableBody(true, true))
+        this.time.delayedCall(2200, () => trail.destroy())
+        this.statusMessage = 'Molten Trail ignited.'
+        this.playTone(320, 0.09)
+        break
+      }
+      case 'FUSION_WAVE':
+        if (!this.speedBoostActive) {
+          this.speedBoostActive = true
+          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 80, 900)
+          this.time.delayedCall(2600, () => {
+            this.speedBoostActive = false
+            this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+          })
+        }
+        this.statusMessage = 'Fusion Wave boost active.'
+        this.playTone(740, 0.1)
+        break
+      case 'ABSORB':
+        this.damageReductionMul = 0.6
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+        this.time.delayedCall(2600, () => {
+          this.damageReductionMul = 1
+        })
+        this.statusMessage = 'Absorb active. Defense boosted.'
+        this.playTone(380, 0.1)
+        break
+      default:
+        this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
+    }
+
     this.updateUiText()
+  }
+
+  private playTone(freq: number, durationSec = 0.06): void {
+    const ctx = (this.sound as unknown as { context?: AudioContext }).context
+    if (!ctx) {
+      return
+    }
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.value = freq
+    gain.gain.value = 0.025
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start()
+    oscillator.stop(ctx.currentTime + durationSec)
   }
 
   private initializeCutscene(): void {
@@ -480,7 +674,7 @@ const config: Phaser.Types.Core.GameConfig = {
   parent: 'app',
   width: 960,
   height: 540,
-  scene: [StageSelectScene, HeroSelectScene, Stage1, RockyCavernsScene, BloodyHillsScene],
+  scene: [IntroStoryScene, StageSelectScene, HeroSelectScene, LaserHillsStubScene, Stage1, RockyCavernsScene, BloodyHillsScene],
   physics: {
     default: 'arcade',
     arcade: {
@@ -491,6 +685,13 @@ const config: Phaser.Types.Core.GameConfig = {
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: 960,
+    height: 540,
+  },
+  render: {
+    antialias: false,
+    roundPixels: true,
+    pixelArt: true,
   },
 }
 
