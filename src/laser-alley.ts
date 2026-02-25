@@ -159,16 +159,16 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.laserBot, () => this.applyDamage(1, 'Laser Bot contact!'))
 
     this.miniBoss = this.physics.add.sprite(2870, 430, wardenTexture)
-    this.miniBoss.setScale(1.25)
+    this.miniBoss.setDisplaySize(124, 124)
     this.miniBoss.setTint(0xff9ab3)
     this.miniBoss.setImmovable(true)
     this.miniBoss.setCollideWorldBounds(true)
     this.miniBossBaseY = 430
     ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(52, 52, true)
+    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(84, 90, true)
     this.physics.add.collider(this.miniBoss, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.miniBoss, () => this.applyDamage(1, 'Laser Warden hit!'))
-    this.miniBossLabel = this.add.text(this.miniBoss.x - 56, this.miniBoss.y - 54, 'LASER WARDEN', {
+    this.miniBossLabel = this.add.text(this.miniBoss.x - 62, this.miniBoss.y - 86, 'LASER WARDEN', {
       color: '#ffd7e4',
       fontFamily: 'sans-serif',
       fontSize: '14px',
@@ -637,7 +637,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.miniBoss.y = this.miniBossBaseY + Math.sin(this.time.now / 280) * 12
     if (this.miniBossLabel) {
       this.miniBossLabel.setVisible(true)
-      this.miniBossLabel.setPosition(this.miniBoss.x - 56, this.miniBoss.y - 54)
+      this.miniBossLabel.setPosition(this.miniBoss.x - 62, this.miniBoss.y - 86)
     }
   }
 

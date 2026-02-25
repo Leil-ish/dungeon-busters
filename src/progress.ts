@@ -12,6 +12,7 @@ export type GameProgress = {
   hurricanoManRescued: boolean
   bouldereyeRescued: boolean
   lavaBogCleared: boolean
+  gameCompleted: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -31,6 +32,7 @@ const defaultProgress: GameProgress = {
   hurricanoManRescued: false,
   bouldereyeRescued: false,
   lavaBogCleared: false,
+  gameCompleted: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,

@@ -119,6 +119,7 @@ export class StageSelectScene extends Phaser.Scene {
         `Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'} | Bloody Map: ${gameProgress.bloodyMapPiece ? 'Yes' : 'No'}`,
         `Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         `Bouldereye: ${gameProgress.bouldereyeRescued ? 'Rescued' : 'Trapped'} | Clear: ${gameProgress.lavaBogCleared ? 'Yes' : 'No'}`,
+        `Campaign Complete: ${gameProgress.gameCompleted ? 'Yes' : 'No'}`,
       ].join('\n'),
     )
     this.statusText.setText('')

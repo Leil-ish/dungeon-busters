@@ -35,6 +35,9 @@ export class LavaBogScene extends Phaser.Scene {
   private miniBoss!: Phaser.Physics.Arcade.Sprite
   private miniBossLabel!: Phaser.GameObjects.Text
   private miniBossBaseY = 470
+  private chromaforge!: Phaser.Physics.Arcade.Sprite
+  private chromaforgeLabel!: Phaser.GameObjects.Text
+  private chromaforgeAllies: Phaser.Physics.Arcade.Sprite[] = []
 
   private bouldereye!: Phaser.Physics.Arcade.Sprite
   private illislimAlly!: Phaser.Physics.Arcade.Sprite
@@ -101,6 +104,9 @@ export class LavaBogScene extends Phaser.Scene {
   private bossFightStarted = false
   private miniBossDefeated = false
   private miniBossHealth = 18
+  private chromaforgeFightStarted = false
+  private chromaforgeDefeated = false
+  private chromaforgeHealth = 22
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
@@ -113,7 +119,10 @@ export class LavaBogScene extends Phaser.Scene {
   private readonly allyShotCooldownMs = 2200
   private bossLastActionAt = 0
   private bossMoveDir = 1
+  private chromaforgeLastActionAt = 0
+  private chromaforgeMoveDir = 1
   private readonly miniBossMaxHealth = 18
+  private readonly chromaforgeMaxHealth = 22
   private patrolEnemyHealth = 3
   private readonly patrolEnemyMaxHealth = 3
   private lavaBotHealth = 4
@@ -188,15 +197,15 @@ export class LavaBogScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.lavaBot, () => this.applyDamage(1, 'Lava Bot contact!'))
 
     this.miniBoss = this.physics.add.sprite(2860, 470, infixTexture)
-    this.miniBoss.setScale(1.35)
+    this.miniBoss.setDisplaySize(132, 132)
     this.miniBoss.setImmovable(true)
     this.miniBoss.setCollideWorldBounds(true)
     ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(56, 56, true)
+    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(88, 96, true)
     this.physics.add.collider(this.miniBoss, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.miniBoss, () => this.applyDamage(1, 'Infix hit!'))
     this.miniBoss.disableBody(true, true)
-    this.miniBossLabel = this.add.text(this.miniBoss.x - 28, this.miniBoss.y - 56, 'INFIX', {
+    this.miniBossLabel = this.add.text(this.miniBoss.x - 26, this.miniBoss.y - 88, 'INFIX', {
       color: '#ffd2b5',
       fontFamily: 'sans-serif',
       fontSize: '14px',
@@ -205,6 +214,26 @@ export class LavaBogScene extends Phaser.Scene {
     })
     this.miniBossLabel.setVisible(false)
     this.miniBossLabel.setDepth(24)
+
+    const chromaforgeTexture = this.textures.exists('boss-chromaforge') ? 'boss-chromaforge' : enemyTexture
+    this.chromaforge = this.physics.add.sprite(3070, 300, chromaforgeTexture)
+    this.chromaforge.setDisplaySize(170, 170)
+    this.chromaforge.setImmovable(true)
+    this.chromaforge.setCollideWorldBounds(true)
+    ;(this.chromaforge.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    ;(this.chromaforge.body as Phaser.Physics.Arcade.Body).setSize(112, 120, true)
+    this.physics.add.collider(this.chromaforge, this.staticPlatforms)
+    this.physics.add.overlap(this.player, this.chromaforge, () => this.applyDamage(1, 'Chromaforge impact!'))
+    this.chromaforge.disableBody(true, true)
+    this.chromaforgeLabel = this.add.text(this.chromaforge.x - 58, this.chromaforge.y - 96, 'CHROMAFORGE', {
+      color: '#ffdff8',
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      backgroundColor: '#2a1025cc',
+      padding: { x: 6, y: 3 },
+    })
+    this.chromaforgeLabel.setVisible(false)
+    this.chromaforgeLabel.setDepth(24)
 
     this.createWeapons()
     this.createRescueObjects()
@@ -280,18 +309,13 @@ export class LavaBogScene extends Phaser.Scene {
       this.startBossFightSequence()
     }
 
-    if (this.rescueDone && this.physics.overlap(this.player, this.exitDoor) && !this.stageClearTriggered) {
-      this.stageClearTriggered = true
-      gameProgress.bouldereyeRescued = true
-      gameProgress.lavaBogCleared = true
-      saveGameProgress()
-      this.statusMessage = 'STAGE CLEAR! Bouldereye is free.'
-      this.updateUiText()
-      this.time.delayedCall(1400, () => this.scene.start('stage-select'))
+    if (this.rescueDone && this.physics.overlap(this.player, this.exitDoor) && !this.chromaforgeFightStarted) {
+      this.startChromaforgeSequence()
     }
 
     this.updatePatrolEnemy()
     this.updateMiniBossMotion()
+    this.updateChromaforgeMotion()
     this.checkLavaHazards()
     this.updateFallingDrips()
     this.checkDripHazards()
@@ -300,12 +324,18 @@ export class LavaBogScene extends Phaser.Scene {
     this.updateRescuedFollower()
     this.updateAlliedFollowers()
     this.updateAllySupportFire()
+    this.updateChromaforgeSupportFire()
     this.updateAllHealthBars()
 
     if (this.bossFightStarted && !this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
       this.miniBossDefeated = true
       this.statusMessage = 'Infix defeated. Vault release open.'
       this.updateUiText()
+    }
+
+    if (this.chromaforgeFightStarted && !this.chromaforgeDefeated && this.chromaforge && !this.chromaforge.active) {
+      this.chromaforgeDefeated = true
+      this.finishGameEnding()
     }
 
     const pBody = this.player.body as Phaser.Physics.Arcade.Body
@@ -343,6 +373,19 @@ export class LavaBogScene extends Phaser.Scene {
       gfx.fillStyle(0xff7748, 1)
       gfx.fillRect(0, 0, 14, 6)
       gfx.generateTexture('laser-bot-shot', 14, 6)
+      gfx.clear()
+    }
+
+    if (!this.textures.exists('boss-chromaforge')) {
+      gfx.fillStyle(0x5c2e6f, 1)
+      gfx.fillRect(0, 0, 56, 56)
+      gfx.fillStyle(0xe05f8f, 1)
+      gfx.fillRect(0, 0, 28, 56)
+      gfx.fillStyle(0x5fcbe0, 1)
+      gfx.fillRect(28, 0, 28, 56)
+      gfx.fillStyle(0xfff1a3, 1)
+      gfx.fillRect(22, 8, 12, 12)
+      gfx.generateTexture('boss-chromaforge', 56, 56)
       gfx.clear()
     }
 
@@ -428,6 +471,9 @@ export class LavaBogScene extends Phaser.Scene {
     })
     this.physics.add.overlap(this.shots, this.miniBoss, (shotObj, enemyObj) => {
       this.handleMiniBossShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
+    })
+    this.physics.add.overlap(this.shots, this.chromaforge, (shotObj, enemyObj) => {
+      this.handleChromaforgeShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
     })
     this.bossMinions = this.physics.add.group({ allowGravity: false, immovable: true, maxSize: 8 })
     this.physics.add.overlap(this.shots, this.bossMinions, (shotObj, minionObj) => {
@@ -590,6 +636,179 @@ export class LavaBogScene extends Phaser.Scene {
     )
   }
 
+  private startChromaforgeSequence(): void {
+    if (this.chromaforgeFightStarted || !this.rescueDone) {
+      return
+    }
+    this.chromaforgeFightStarted = true
+    this.chromaforgeDefeated = false
+    this.chromaforgeHealth = this.chromaforgeMaxHealth
+    this.chromaforge.enableBody(true, 3070, 300, true, true)
+    this.chromaforgeLabel.setVisible(true)
+    this.spawnChromaforgeAllies()
+    this.startDialogue(
+      [
+        'Chromaforge: You broke the vault chain. Final trial begins.',
+        'Bouldereye: Dungeon Busters, full formation.',
+        'Micralis: All heroes, engage Chromaforge now!',
+        'Press Space to begin the final battle.',
+      ],
+      () => {
+        this.chromaforgeLastActionAt = this.time.now
+        this.statusMessage = 'Final Boss: Chromaforge.'
+        this.updateUiText()
+      },
+    )
+  }
+
+  private spawnChromaforgeAllies(): void {
+    for (const ally of this.chromaforgeAllies) {
+      ally.destroy()
+    }
+    this.chromaforgeAllies = []
+    const heroTextureKeys = [
+      'hero-micralis',
+      'hero-electroman',
+      'hero-glowman',
+      'hero-icemeckel',
+      'hero-volcano-man',
+      'hero-swirl-exanimo',
+      'hero-illislim',
+      'hero-hurricano-man',
+      'hero-bouldereye',
+    ]
+    const unique = heroTextureKeys.filter((key, idx) => heroTextureKeys.indexOf(key) === idx)
+    unique.forEach((textureKey, idx) => {
+      if (!this.textures.exists(textureKey)) {
+        return
+      }
+      const ally = this.physics.add.sprite(this.player.x - 140 + idx * 34, this.player.y - 80, textureKey)
+      ally.setScale(0.85)
+      ally.setImmovable(true)
+      ;(ally.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.chromaforgeAllies.push(ally)
+    })
+  }
+
+  private updateChromaforgeMotion(): void {
+    if (!this.chromaforge.active || this.chromaforgeDefeated) {
+      this.chromaforgeLabel.setVisible(false)
+      return
+    }
+    this.chromaforge.y = 300 + Math.sin(this.time.now / 260) * 16
+    if (this.chromaforgeFightStarted && !this.cutsceneActive) {
+      this.chromaforge.x += this.chromaforgeMoveDir * 2.2
+      if (this.chromaforge.x < 2720) {
+        this.chromaforgeMoveDir = 1
+      } else if (this.chromaforge.x > 3110) {
+        this.chromaforgeMoveDir = -1
+      }
+      if (this.time.now - this.chromaforgeLastActionAt > 1100) {
+        this.performChromaforgeAction()
+        this.chromaforgeLastActionAt = this.time.now
+      }
+    }
+    this.chromaforgeLabel.setVisible(true)
+    this.chromaforgeLabel.setPosition(this.chromaforge.x - 58, this.chromaforge.y - 96)
+  }
+
+  private performChromaforgeAction(): void {
+    if (!this.chromaforge.active || this.chromaforgeDefeated) {
+      return
+    }
+    const roll = Phaser.Math.Between(0, 99)
+    if (roll < 42) {
+      this.chromaforgeRadialBurst()
+      return
+    }
+    if (roll < 76) {
+      this.chromaforgeTrackingVolley()
+      return
+    }
+    this.chromaforgeSummonMinions()
+  }
+
+  private chromaforgeRadialBurst(): void {
+    const count = 8
+    for (let i = 0; i < count; i += 1) {
+      const angle = (Math.PI * 2 * i) / count
+      const shot = this.botShots.get(this.chromaforge.x, this.chromaforge.y, 'laser-bot-shot') as
+        | Phaser.Physics.Arcade.Image
+        | null
+      if (!shot) {
+        continue
+      }
+      shot.enableBody(true, this.chromaforge.x, this.chromaforge.y, true, true)
+      shot.setActive(true)
+      shot.setVisible(true)
+      shot.setVelocity(Math.cos(angle) * 230, Math.sin(angle) * 230)
+      this.time.delayedCall(1700, () => shot.disableBody(true, true))
+    }
+    this.statusMessage = 'Chromaforge: Spectrum burst!'
+    this.updateUiText()
+  }
+
+  private chromaforgeTrackingVolley(): void {
+    const shotCount = 4
+    for (let i = 0; i < shotCount; i += 1) {
+      this.time.delayedCall(i * 90, () => {
+        if (!this.chromaforge.active || this.chromaforgeDefeated) {
+          return
+        }
+        const shot = this.botShots.get(this.chromaforge.x, this.chromaforge.y, 'laser-bot-shot') as
+          | Phaser.Physics.Arcade.Image
+          | null
+        if (!shot) {
+          return
+        }
+        const dx = this.player.x - this.chromaforge.x
+        const dy = this.player.y - this.chromaforge.y
+        const len = Math.max(1, Math.hypot(dx, dy))
+        shot.enableBody(true, this.chromaforge.x, this.chromaforge.y, true, true)
+        shot.setActive(true)
+        shot.setVisible(true)
+        shot.setVelocity((dx / len) * 280, (dy / len) * 280)
+        this.time.delayedCall(1700, () => shot.disableBody(true, true))
+      })
+    }
+    this.statusMessage = 'Chromaforge: Focus volley!'
+    this.updateUiText()
+  }
+
+  private chromaforgeSummonMinions(): void {
+    const spawnCount = 2
+    for (let i = 0; i < spawnCount; i += 1) {
+      const minion = this.bossMinions.get(
+        this.chromaforge.x + Phaser.Math.Between(-80, 80),
+        this.chromaforge.y + 40,
+        'enemy-scout',
+      ) as Phaser.Physics.Arcade.Sprite | null
+      if (!minion) {
+        continue
+      }
+      minion.enableBody(true, minion.x, minion.y, true, true)
+      minion.setActive(true)
+      minion.setVisible(true)
+      minion.setCollideWorldBounds(true)
+      ;(minion.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      minion.setData('hp', 3)
+      minion.setData('maxHp', 3)
+      minion.setVelocityX(Phaser.Math.Between(-120, 120))
+      if (!this.minionHealthBars.has(minion)) {
+        const gfx = this.add.graphics()
+        gfx.setDepth(30)
+        this.minionHealthBars.set(minion, gfx)
+      }
+      this.time.delayedCall(3500, () => {
+        if (minion.active) {
+          minion.disableBody(true, true)
+        }
+      })
+    }
+    this.statusMessage = 'Chromaforge summoned elite minions!'
+    this.updateUiText()
+  }
+
   private createCheckpointsAndItems(): void {
     const defs: Array<[number, number]> = [
       [1020, 690],
@@ -715,7 +934,7 @@ export class LavaBogScene extends Phaser.Scene {
       }
     }
     this.miniBossLabel.setVisible(true)
-    this.miniBossLabel.setPosition(this.miniBoss.x - 50, this.miniBoss.y - 56)
+    this.miniBossLabel.setPosition(this.miniBoss.x - 26, this.miniBoss.y - 88)
 
     if (this.bossFightStarted && !this.cutsceneActive && this.time.now - this.bossLastActionAt > 1450) {
       this.performBossAction()
@@ -1000,6 +1219,21 @@ export class LavaBogScene extends Phaser.Scene {
 
     followAlly(this.illislimAlly, this.illislimRescued, -84, -6)
     followAlly(this.hurricanoAlly, this.hurricanoRescued, -116, -18)
+
+    if (this.chromaforgeFightStarted) {
+      for (let i = 0; i < this.chromaforgeAllies.length; i += 1) {
+        const ally = this.chromaforgeAllies[i]
+        if (!ally.active) {
+          continue
+        }
+        const row = Math.floor(i / 5)
+        const col = i % 5
+        const offsetX = -170 + col * 38
+        const offsetY = -68 - row * 28
+        ally.x = Phaser.Math.Linear(ally.x, this.player.x + offsetX * this.facingDir, 0.08)
+        ally.y = Phaser.Math.Linear(ally.y, this.player.y + offsetY, 0.08)
+      }
+    }
   }
 
   private updateAllySupportFire(): void {
@@ -1032,6 +1266,39 @@ export class LavaBogScene extends Phaser.Scene {
     }
     if (this.hurricanoRescued && this.hurricanoAlly.active) {
       this.spawnAllyShot(this.hurricanoAlly.x, this.hurricanoAlly.y - 6, 0x9eefff)
+    }
+  }
+
+  private updateChromaforgeSupportFire(): void {
+    if (!this.chromaforgeFightStarted || this.chromaforgeDefeated || !this.chromaforge.active || this.cutsceneActive) {
+      return
+    }
+    if (this.chromaforgeAllies.length === 0) {
+      return
+    }
+    if (this.time.now - this.allyLastShotAt < this.allyShotCooldownMs) {
+      return
+    }
+    this.allyLastShotAt = this.time.now
+
+    const shooters = this.chromaforgeAllies.slice(0, Math.min(4, this.chromaforgeAllies.length))
+    for (const ally of shooters) {
+      const bolt = this.add.rectangle(ally.x, ally.y - 6, 9, 5, 0xc9e4ff, 0.95)
+      bolt.setDepth(20)
+      this.tweens.add({
+        targets: bolt,
+        x: this.chromaforge.x,
+        y: this.chromaforge.y,
+        duration: 240,
+        ease: 'Sine.Out',
+        onComplete: () => {
+          bolt.destroy()
+          if (!this.chromaforge.active || this.chromaforgeDefeated) {
+            return
+          }
+          this.damageChromaforge(0.35)
+        },
+      })
     }
   }
 
@@ -1148,6 +1415,14 @@ export class LavaBogScene extends Phaser.Scene {
     this.damageMiniBoss(1)
   }
 
+  private handleChromaforgeShot(shot: Phaser.Physics.Arcade.Image, enemy: Phaser.Physics.Arcade.Sprite): void {
+    if (!enemy.active || this.chromaforgeDefeated) {
+      return
+    }
+    shot.disableBody(true, true)
+    this.damageChromaforge(1)
+  }
+
   private damageMiniBoss(amount: number): void {
     if (!this.miniBoss.active || this.miniBossDefeated) {
       return
@@ -1172,6 +1447,52 @@ export class LavaBogScene extends Phaser.Scene {
     }
 
     this.updateUiText()
+  }
+
+  private damageChromaforge(amount: number): void {
+    if (!this.chromaforge.active || this.chromaforgeDefeated) {
+      return
+    }
+    this.chromaforgeHealth = Math.max(0, this.chromaforgeHealth - amount)
+    this.chromaforge.setTint(0xffd9f7)
+    this.time.delayedCall(100, () => {
+      if (this.chromaforge.active) {
+        this.chromaforge.clearTint()
+      }
+    })
+
+    if (this.chromaforgeHealth <= 0) {
+      this.chromaforgeDefeated = true
+      this.chromaforge.disableBody(true, true)
+      this.chromaforgeLabel.setVisible(false)
+      this.statusMessage = 'Chromaforge defeated. Dungeon Planet stabilized.'
+      this.playTone(200, 0.16)
+      this.finishGameEnding()
+    } else {
+      this.statusMessage = `Chromaforge HP: ${this.chromaforgeHealth.toFixed(1)}`
+    }
+    this.updateUiText()
+  }
+
+  private finishGameEnding(): void {
+    if (this.stageClearTriggered) {
+      return
+    }
+    this.stageClearTriggered = true
+    gameProgress.bouldereyeRescued = true
+    gameProgress.lavaBogCleared = true
+    gameProgress.gameCompleted = true
+    saveGameProgress()
+    this.startDialogue(
+      [
+        'Chromaforge: Trials complete. Team cohesion confirmed.',
+        'Bouldereye: Dungeon Busters, mission complete.',
+        'THE END - Press Space',
+      ],
+      () => {
+        this.scene.start('intro-story')
+      },
+    )
   }
 
   private tryUseHeroAbility(): void {
@@ -1358,6 +1679,7 @@ export class LavaBogScene extends Phaser.Scene {
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
         `Infix: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth.toFixed(1)} HP`}`,
+        `Chromaforge: ${this.chromaforgeFightStarted ? (this.chromaforgeDefeated ? 'Defeated' : `${this.chromaforgeHealth.toFixed(1)} HP`) : 'Dormant'}`,
         `Illislim: ${this.illislimRescued ? 'Joined' : 'Missing'}`,
         `Hurricano Man: ${this.hurricanoRescued ? 'Joined' : 'Missing'}`,
         `Bouldereye: ${this.rescueDone ? 'Rescued' : 'Trapped'}`,
@@ -1423,6 +1745,20 @@ export class LavaBogScene extends Phaser.Scene {
       this.drawHealthBar('infix', this.miniBoss.x, this.miniBoss.y - 52, 92, 0, this.miniBossMaxHealth, 0xff8c70)
     }
 
+    if (this.chromaforge.active && !this.chromaforgeDefeated) {
+      this.drawHealthBar(
+        'chromaforge',
+        this.chromaforge.x,
+        this.chromaforge.y - 52,
+        96,
+        this.chromaforgeHealth,
+        this.chromaforgeMaxHealth,
+        0xe6a1ff,
+      )
+    } else {
+      this.drawHealthBar('chromaforge', this.chromaforge.x, this.chromaforge.y - 52, 96, 0, this.chromaforgeMaxHealth, 0xe6a1ff)
+    }
+
     if (this.illislimRescued && this.illislimAlly.active) {
       this.drawHealthBar('illislim', this.illislimAlly.x, this.illislimAlly.y - 36, 38, this.allyMaxHealth, this.allyMaxHealth, 0x9effbd)
     } else {
@@ -1439,6 +1775,16 @@ export class LavaBogScene extends Phaser.Scene {
       this.drawHealthBar('bouldereye', this.bouldereye.x, this.bouldereye.y - 36, 42, this.bouldereyeMaxHealth, this.bouldereyeMaxHealth, 0xffd18e)
     } else {
       this.drawHealthBar('bouldereye', 0, 0, 42, 0, this.bouldereyeMaxHealth, 0xffd18e)
+    }
+
+    for (let i = 0; i < this.chromaforgeAllies.length; i += 1) {
+      const ally = this.chromaforgeAllies[i]
+      const key = `final-ally-${i}`
+      if (this.chromaforgeFightStarted && ally.active) {
+        this.drawHealthBar(key, ally.x, ally.y - 24, 30, this.allyMaxHealth, this.allyMaxHealth, 0xbdd6ff)
+      } else {
+        this.drawHealthBar(key, 0, 0, 30, 0, this.allyMaxHealth, 0xbdd6ff)
+      }
     }
 
     for (const [minion, gfx] of this.minionHealthBars.entries()) {
