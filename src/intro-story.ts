@@ -7,6 +7,7 @@ export class IntroStoryScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0a1020')
+    const viewportH = this.scale.height
 
     this.add.text(70, 48, 'Dungeon Busters', {
       color: '#f4f7ff',
@@ -30,19 +31,20 @@ export class IntroStoryScene extends Phaser.Scene {
       'Open the Game Log from Stage Select for discovered lore after each stage.',
     ]
 
-    this.add.text(70, 182, lines.join('\n\n'), {
+    this.add.text(70, 176, lines.join('\n'), {
       color: '#d9e7ff',
       fontFamily: 'sans-serif',
-      fontSize: '21px',
+      fontSize: '19px',
       wordWrap: { width: 820 },
-      lineSpacing: 6,
+      lineSpacing: 4,
     })
 
-    this.add.text(70, 500, 'Press Enter to continue to Stage Select', {
+    const prompt = this.add.text(70, viewportH - 14, 'Press Enter to continue to Stage Select', {
       color: '#b8c7e6',
       fontFamily: 'sans-serif',
-      fontSize: '20px',
+      fontSize: '18px',
     })
+    prompt.setOrigin(0, 1)
 
     this.input.keyboard?.once('keydown-ENTER', () => this.scene.start('stage-select'))
     this.input.keyboard?.once('keydown-SPACE', () => this.scene.start('stage-select'))
