@@ -98,7 +98,7 @@ export class LaserAlleyScene extends Phaser.Scene {
   private healthPickup: Phaser.GameObjects.Rectangle | null = null
   private powerPickup: Phaser.GameObjects.Rectangle | null = null
 
-  private statusMessage = 'Navigate Laser Alley and rescue Swirl Exanimo.'
+  private statusMessage = 'Navigate Laser Alley and rescue Exemon.'
   private readonly stageName = 'Stage 4: Laser Alley'
 
   constructor() {
@@ -134,6 +134,9 @@ export class LaserAlleyScene extends Phaser.Scene {
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
     const wardenTexture = this.textures.exists('enemy-laser-warden') ? 'enemy-laser-warden' : enemyTexture
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
+    if (heroTexture === 'hero-exemon') {
+      this.player.setDisplaySize(56, 64)
+    }
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
@@ -475,8 +478,11 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.prismCell = this.add.rectangle(2790, 450, 90, 140, 0x8ca4ff, 0.38)
     this.prismCell.setStrokeStyle(3, 0xd8e4ff, 0.9)
 
-    const swirlTexture = this.textures.exists('hero-swirl-exanimo') ? 'hero-swirl-exanimo' : 'player-block'
+    const swirlTexture = this.textures.exists('hero-exemon') ? 'hero-exemon' : 'player-block'
     this.swirlExanimo = this.physics.add.sprite(2790, 450, swirlTexture)
+    if (swirlTexture === 'hero-exemon') {
+      this.swirlExanimo.setDisplaySize(68, 76)
+    }
     this.swirlExanimo.setVisible(false)
     this.swirlExanimo.disableBody(true, true)
     this.physics.add.collider(this.swirlExanimo, this.staticPlatforms)
@@ -747,8 +753,8 @@ export class LaserAlleyScene extends Phaser.Scene {
       ;(this.swirlExanimo.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
 
       this.cutsceneLines = [
-        'Swirl Exanimo: Okay, we are ready.',
-        'Swirl Exanimo: Keep moving. Laser Alley is syncing again.',
+        'Exemon: Okay, we are ready.',
+        'Exemon: Keep moving. Laser Alley is syncing again.',
         'Press Space to continue.',
       ]
       this.cutsceneLineIndex = 0
@@ -758,7 +764,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       gameProgress.swirlExanimoRescued = true
       saveGameProgress()
       this.exitDoor.setAlpha(1)
-      this.statusMessage = 'Swirl Exanimo rescued. Reach the exit.'
+      this.statusMessage = 'Exemon rescued. Reach the exit.'
       this.updateUiText()
     })
   }
@@ -972,7 +978,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       'Inspector Glowman: Laser Alley ahead. Stay sharp.',
       'Electroman: Patterns are cycling. Move on the off-beats.',
       'Micralis: Vertical climb route is the cleanest path.',
-      'Mission: Rescue Swirl Exanimo and secure the map to Lava Bog.',
+      'Mission: Rescue Exemon and secure the map to Lava Bog.',
       'Press Space to start.',
     ]
     this.cutsceneLineIndex = 0
@@ -1020,7 +1026,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.cutsceneText.setVisible(false)
 
     if (!this.rescueDone) {
-      this.statusMessage = 'Find Swirl Exanimo in the upper prism chamber.'
+      this.statusMessage = 'Find Exemon in the upper prism chamber.'
     }
     this.updateUiText()
   }
@@ -1037,7 +1043,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
         `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth} HP`}`,
-        `Swirl Exanimo: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
+        `Exemon: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         this.statusMessage,
       ].join('\n'),

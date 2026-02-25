@@ -200,6 +200,7 @@ export class HeroSelectScene extends Phaser.Scene {
       SWIRL_EXANIMO: 0xd5a9ff,
       ILLISLIM: 0x8ed8a6,
       HURRICANO_MAN: 0x79f0ff,
+      CHROMAFORGE: 0xe6a1ff,
     }
 
     return map[heroId]
@@ -213,6 +214,7 @@ export class HeroSelectScene extends Phaser.Scene {
       ZOMBIE_MOUNTAINS: 'Zombie Mountains',
       LAVA_BOG: 'Lava Bog',
       BLOODY_HILLS: 'Bloody Hills',
+      FORGE_OF_ORIGINS: 'Forge of Origins',
     }
     return map[stageId]
   }
@@ -230,6 +232,18 @@ export class HeroSelectScene extends Phaser.Scene {
     }
     if (gameProgress.swirlExanimoRescued) {
       unlocked.add('SWIRL_EXANIMO')
+    }
+    const forgeUnlocked =
+      gameProgress.devUnlockForgeOrigins ||
+      (gameProgress.lavaBogCleared &&
+        gameProgress.volcanoManRescued &&
+        gameProgress.icemeckelRescued &&
+        gameProgress.swirlExanimoRescued &&
+        gameProgress.illislimRescued &&
+        gameProgress.hurricanoManRescued &&
+        gameProgress.bouldereyeRescued)
+    if (forgeUnlocked) {
+      unlocked.add('CHROMAFORGE')
     }
     return (Object.keys(HEROES) as HeroId[]).filter((heroId) => unlocked.has(heroId))
   }

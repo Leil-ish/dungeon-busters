@@ -131,6 +131,9 @@ export class RockyCavernsScene extends Phaser.Scene {
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
+    if (heroTexture === 'hero-exemon') {
+      this.player.setDisplaySize(56, 64)
+    }
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)

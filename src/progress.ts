@@ -13,6 +13,8 @@ export type GameProgress = {
   bouldereyeRescued: boolean
   lavaBogCleared: boolean
   gameCompleted: boolean
+  forgeOfOriginsCleared: boolean
+  devUnlockForgeOrigins: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -33,6 +35,8 @@ const defaultProgress: GameProgress = {
   bouldereyeRescued: false,
   lavaBogCleared: false,
   gameCompleted: false,
+  forgeOfOriginsCleared: false,
+  devUnlockForgeOrigins: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,

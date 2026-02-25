@@ -106,7 +106,7 @@ export class GameLogScene extends Phaser.Scene {
         title: 'Laser Alley',
         unlocked: gameProgress.swirlExanimoRescued,
         body:
-          'Timed beams and moving traps protected the prism chamber. Swirl Exanimo joined the team, and the Map to Lava Bog was recovered for the final push.',
+          'Timed beams and moving traps protected the prism chamber. Exemon joined the team, and the Map to Lava Bog was recovered for the final push.',
       },
       {
         id: 'allies',

@@ -26,7 +26,7 @@ export class IntroStoryScene extends Phaser.Scene {
       'During insertion, the ship was crushed over a hostile dungeon planet.',
       'Bouldereye was captured and locked in a vault under Lava Bog.',
       'Each region holds rescue targets, map pieces, and gate locks to the final chamber.',
-      'Swirl Exanimo, Icemeckel, Volcano Man, Illislim, and Hurricano Man can join the mission.',
+      'Exemon, Icemeckel, Volcano Man, Illislim, and Hurricano Man can join the mission.',
       'Final objective: defeat Infix, break the vault chain, and extract the full team.',
       'Open the Game Log from Stage Select for discovered lore after each stage.',
     ]

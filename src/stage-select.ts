@@ -14,6 +14,7 @@ export class StageSelectScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0f1624')
+    const viewportH = this.scale.height
 
     this.add.text(80, 80, 'Dungeon Busters', {
       color: '#f4f7ff',
@@ -30,44 +31,38 @@ export class StageSelectScene extends Phaser.Scene {
     this.leftColumnText = this.add.text(80, 206, '', {
       color: '#e7eeff',
       fontFamily: 'sans-serif',
-      fontSize: '20px',
-      lineSpacing: 8,
+      fontSize: '18px',
+      lineSpacing: 6,
     })
 
     this.rightColumnText = this.add.text(520, 206, '', {
       color: '#dbe6ff',
       fontFamily: 'sans-serif',
-      fontSize: '20px',
-      lineSpacing: 8,
+      fontSize: '18px',
+      lineSpacing: 6,
     })
 
-    this.controlsText = this.add.text(80, 392, '', {
+    this.controlsText = this.add.text(80, viewportH - 128, '', {
       color: '#b2c5e9',
       fontFamily: 'sans-serif',
-      fontSize: '18px',
-    })
-    this.controlsText.setText(
-      [
-        'Press 1 for Slippery Slopes',
-        'Press 2 for Rocky Caverns',
-        'Press 3 for Bloody Hills',
-        'Press 4 for Laser Alley',
-        'Press 5 for Lava Bog',
-        'Press L for Game Log',
-      ].join('\n'),
-    )
-
-    this.statusText = this.add.text(80, 502, '', {
-      color: '#ffdca8',
-      fontFamily: 'sans-serif',
       fontSize: '16px',
+      lineSpacing: 2,
     })
+    this.controlsText.setOrigin(0, 1)
+    this.controlsText.setText('Keys: 1-6 = Stages, L = Game Log')
 
-    this.add.text(80, 522, 'Micralis is always available. Other heroes unlock by rescue progress.', {
+    this.statusText = this.add.text(80, viewportH - 56, '', {
       color: '#ffdca8',
       fontFamily: 'sans-serif',
-      fontSize: '14px',
+      fontSize: '15px',
     })
+
+    const helperText = this.add.text(80, viewportH - 18, 'Micralis is always available. Other heroes unlock by rescue progress.', {
+      color: '#ffdca8',
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+    })
+    helperText.setOrigin(0, 1)
 
     this.input.keyboard?.on('keydown-ONE', () => this.queueHeroSelect('SLIPPERY_HILLS', 'stage1'))
     this.input.keyboard?.on('keydown-TWO', () =>
@@ -97,6 +92,9 @@ export class StageSelectScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-FIVE', () =>
       this.tryQueueStage(gameProgress.lavaBogMap, 'Need Map to Lava Bog first.', 'LAVA_BOG', 'lava-bog'),
     )
+    this.input.keyboard?.on('keydown-SIX', () =>
+      this.tryQueueStage(this.isForgeUnlocked(), 'Finish Lava Bog + all rescues first (or dev unlock).', 'FORGE_OF_ORIGINS', 'forge-of-origins'),
+    )
     this.input.keyboard?.on('keydown-L', () => this.scene.start('game-log'))
 
     this.refreshProgressText()
@@ -110,6 +108,7 @@ export class StageSelectScene extends Phaser.Scene {
         '3. Stage 3: Bloody Hills',
         '4. Stage 4: Laser Alley',
         '5. Stage 5: Lava Bog',
+        '6. Stage 6: Forge of Origins',
       ].join('\n'),
     )
     this.rightColumnText.setText(
@@ -117,12 +116,25 @@ export class StageSelectScene extends Phaser.Scene {
         `Torrent Key Piece: ${gameProgress.torrentKeyPiece ? 'Yes' : 'No'}`,
         `Volcano Man: ${gameProgress.volcanoManRescued ? 'Rescued' : 'Missing'} | Cavern Map: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
         `Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'} | Bloody Map: ${gameProgress.bloodyMapPiece ? 'Yes' : 'No'}`,
-        `Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
+        `Exemon: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         `Bouldereye: ${gameProgress.bouldereyeRescued ? 'Rescued' : 'Trapped'} | Clear: ${gameProgress.lavaBogCleared ? 'Yes' : 'No'}`,
-        `Campaign Complete: ${gameProgress.gameCompleted ? 'Yes' : 'No'}`,
+        `Forge Unlock: ${this.isForgeUnlocked() ? 'Yes' : 'No'} | Stage 6 Clear: ${gameProgress.forgeOfOriginsCleared ? 'Yes' : 'No'}`,
       ].join('\n'),
     )
     this.statusText.setText('')
+  }
+
+  private isForgeUnlocked(): boolean {
+    return (
+      gameProgress.devUnlockForgeOrigins ||
+      (gameProgress.lavaBogCleared &&
+        gameProgress.volcanoManRescued &&
+        gameProgress.icemeckelRescued &&
+        gameProgress.swirlExanimoRescued &&
+        gameProgress.illislimRescued &&
+        gameProgress.hurricanoManRescued &&
+        gameProgress.bouldereyeRescued)
+    )
   }
 
   private queueHeroSelect(stageId: StageId, sceneKey: string): void {

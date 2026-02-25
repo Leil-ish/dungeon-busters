@@ -175,6 +175,9 @@ export class LavaBogScene extends Phaser.Scene {
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
     const infixTexture = this.textures.exists('enemy-infix') ? 'enemy-infix' : enemyTexture
     this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
+    if (heroTexture === 'hero-exemon') {
+      this.player.setDisplaySize(56, 64)
+    }
     this.player.setCollideWorldBounds(true)
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
@@ -672,7 +675,7 @@ export class LavaBogScene extends Phaser.Scene {
       'hero-glowman',
       'hero-icemeckel',
       'hero-volcano-man',
-      'hero-swirl-exanimo',
+      'hero-exemon',
       'hero-illislim',
       'hero-hurricano-man',
       'hero-bouldereye',
@@ -683,7 +686,11 @@ export class LavaBogScene extends Phaser.Scene {
         return
       }
       const ally = this.physics.add.sprite(this.player.x - 140 + idx * 34, this.player.y - 80, textureKey)
-      ally.setScale(0.85)
+      if (textureKey === 'hero-exemon') {
+        ally.setDisplaySize(38, 44)
+      } else {
+        ally.setScale(0.85)
+      }
       ally.setImmovable(true)
       ;(ally.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
       this.chromaforgeAllies.push(ally)

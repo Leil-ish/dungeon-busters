@@ -5,6 +5,7 @@ export type StageId =
   | 'ZOMBIE_MOUNTAINS'
   | 'LAVA_BOG'
   | 'BLOODY_HILLS'
+  | 'FORGE_OF_ORIGINS'
 
 export type HeroId =
   | 'MICRALIS'
@@ -15,6 +16,7 @@ export type HeroId =
   | 'SWIRL_EXANIMO'
   | 'ILLISLIM'
   | 'HURRICANO_MAN'
+  | 'CHROMAFORGE'
 
 export type HeroAbilityId =
   | 'PHOTON_DASH'
@@ -25,6 +27,7 @@ export type HeroAbilityId =
   | 'FUSION_WAVE'
   | 'ABSORB'
   | 'GUST_DASH'
+  | 'SOLAR_BIND'
 
 export type HeroSuperId =
   | 'OVERDRIVE_CANNON'
@@ -35,6 +38,7 @@ export type HeroSuperId =
   | 'ELEMENTAL_SPIRAL'
   | 'SLIME_DOMINION'
   | 'HURRICANE_SURGE'
+  | 'FORGE_BURST'
 
 export type HeroAffinity = {
   speedMul: number
@@ -94,6 +98,7 @@ const makeAffinity = (
   zombie: HeroAffinity,
   lava: HeroAffinity,
   bloody: HeroAffinity,
+  forge?: HeroAffinity,
 ): Record<StageId, HeroAffinity> => ({
   SLIPPERY_HILLS: slippery,
   ROCKY_CAVERNS: rocky,
@@ -101,6 +106,7 @@ const makeAffinity = (
   ZOMBIE_MOUNTAINS: zombie,
   LAVA_BOG: lava,
   BLOODY_HILLS: bloody,
+  FORGE_OF_ORIGINS: forge ?? { speedMul: 1.0, damageMul: 1.0, defenseMul: 1.0, jumpMul: 1.0 },
 })
 
 export const HEROES: Record<HeroId, HeroDefinition> = {
@@ -305,8 +311,8 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   },
   SWIRL_EXANIMO: {
     id: 'SWIRL_EXANIMO',
-    displayName: 'Swirl Exanimo',
-    textureKey: 'hero-swirl-exanimo',
+    displayName: 'Exemon',
+    textureKey: 'hero-exemon',
     specialAbility: 'FUSION_WAVE',
     superAbility: 'ELEMENTAL_SPIRAL',
     tuning: { speedMul: 1.03, jumpMul: 1.04, damageMul: 1.01, defenseMul: 0.99, cooldownMul: 1.18, shotSpeedMul: 1.02 },
@@ -417,6 +423,46 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
       super: {
         name: 'Hurricane Surge',
         description: 'Surrounding wind field pushing enemies away.',
+        implementation: 'todo',
+        notes: 'TODO: super system not implemented yet.',
+      },
+    },
+  },
+  CHROMAFORGE: {
+    id: 'CHROMAFORGE',
+    displayName: 'Chromaforge',
+    textureKey: 'hero-chromaforge',
+    specialAbility: 'SOLAR_BIND',
+    superAbility: 'FORGE_BURST',
+    tuning: { speedMul: 1.08, jumpMul: 1.06, damageMul: 1.12, defenseMul: 1.05, cooldownMul: 0.92, shotSpeedMul: 1.1 },
+    affinity: makeAffinity(
+      { speedMul: 1.02, damageMul: 1.02, defenseMul: 1.03, jumpMul: 1.02 },
+      { speedMul: 1.03, damageMul: 1.02, defenseMul: 1.02, jumpMul: 1.02 },
+      { speedMul: 1.04, damageMul: 1.04, defenseMul: 1.01, jumpMul: 1.03 },
+      { speedMul: 1.03, damageMul: 1.03, defenseMul: 1.02, jumpMul: 1.03 },
+      { speedMul: 1.08, damageMul: 1.1, defenseMul: 1.06, jumpMul: 1.05 },
+      { speedMul: 1.05, damageMul: 1.06, defenseMul: 1.04, jumpMul: 1.04 },
+      { speedMul: 1.2, damageMul: 1.18, defenseMul: 1.12, jumpMul: 1.12 },
+    ),
+    moves: {
+      basic: {
+        name: 'Triple Spectrum Shot',
+        description: 'Fires three beams: straight, up-angle, down-angle.',
+        implementation: 'implemented',
+      },
+      charge: {
+        name: 'Forge Melee Combo',
+        description: 'Punch combo and forward kick lunge.',
+        implementation: 'partial',
+      },
+      special: {
+        name: 'Solar Bind',
+        description: 'Energy pulse that stuns enemies briefly.',
+        implementation: 'implemented',
+      },
+      super: {
+        name: 'Forge Burst',
+        description: 'Large circular energy explosion.',
         implementation: 'todo',
         notes: 'TODO: super system not implemented yet.',
       },
