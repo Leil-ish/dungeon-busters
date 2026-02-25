@@ -100,7 +100,7 @@ export class LavaBogScene extends Phaser.Scene {
   private hurricanoRescued = false
   private bossFightStarted = false
   private miniBossDefeated = false
-  private miniBossHealth = 6
+  private miniBossHealth = 18
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
@@ -110,8 +110,18 @@ export class LavaBogScene extends Phaser.Scene {
   private damageReductionMul = 1
   private speedBoostActive = false
   private allyLastShotAt = 0
-  private readonly allyShotCooldownMs = 950
+  private readonly allyShotCooldownMs = 2200
   private bossLastActionAt = 0
+  private bossMoveDir = 1
+  private readonly miniBossMaxHealth = 18
+  private patrolEnemyHealth = 3
+  private readonly patrolEnemyMaxHealth = 3
+  private lavaBotHealth = 4
+  private readonly lavaBotMaxHealth = 4
+  private readonly allyMaxHealth = 6
+  private readonly bouldereyeMaxHealth = 8
+  private healthBarGfx = new Map<string, Phaser.GameObjects.Graphics>()
+  private minionHealthBars = new Map<Phaser.Physics.Arcade.Sprite, Phaser.GameObjects.Graphics>()
 
   private playerMaxHealth = 10
   private playerHealth = 7
@@ -290,6 +300,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.updateRescuedFollower()
     this.updateAlliedFollowers()
     this.updateAllySupportFire()
+    this.updateAllHealthBars()
 
     if (this.bossFightStarted && !this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
       this.miniBossDefeated = true
@@ -426,9 +437,18 @@ export class LavaBogScene extends Phaser.Scene {
         return
       }
       shot.disableBody(true, true)
-      minion.disableBody(true, true)
-      this.statusMessage = 'Minion down!'
-      this.updateUiText()
+      const hp = Math.max(0, Number(minion.getData('hp') ?? 1) - 1)
+      minion.setData('hp', hp)
+      if (hp <= 0) {
+        minion.disableBody(true, true)
+        const bar = this.minionHealthBars.get(minion)
+        if (bar) {
+          bar.destroy()
+          this.minionHealthBars.delete(minion)
+        }
+        this.statusMessage = 'Minion down!'
+        this.updateUiText()
+      }
     })
 
     this.botShots = this.physics.add.group({ allowGravity: false, maxSize: 10 })
@@ -497,6 +517,8 @@ export class LavaBogScene extends Phaser.Scene {
   private checkAllyRescues(): void {
     if (!this.illislimRescued && this.physics.overlap(this.player, this.illislimTrigger)) {
       this.illislimRescued = true
+      gameProgress.illislimRescued = true
+      saveGameProgress()
       this.illislimCell.destroy()
       this.illislimAlly.enableBody(true, 1540, 620, true, true)
       this.illislimAlly.setVisible(true)
@@ -521,6 +543,8 @@ export class LavaBogScene extends Phaser.Scene {
 
     if (!this.hurricanoRescued && this.physics.overlap(this.player, this.hurricanoTrigger)) {
       this.hurricanoRescued = true
+      gameProgress.hurricanoManRescued = true
+      saveGameProgress()
       this.hurricanoCell.destroy()
       this.hurricanoAlly.enableBody(true, 2180, 560, true, true)
       this.hurricanoAlly.setVisible(true)
@@ -549,7 +573,7 @@ export class LavaBogScene extends Phaser.Scene {
     }
     this.bossFightStarted = true
     this.miniBossDefeated = false
-    this.miniBossHealth = Math.max(1, this.miniBossHealth)
+    this.miniBossHealth = this.miniBossMaxHealth
     this.miniBoss.enableBody(true, 2860, 470, true, true)
     this.miniBossLabel.setVisible(true)
     this.startDialogue(
@@ -682,6 +706,14 @@ export class LavaBogScene extends Phaser.Scene {
       return
     }
     this.miniBoss.y = this.miniBossBaseY + Math.sin(this.time.now / 300) * 12
+    if (this.bossFightStarted && !this.cutsceneActive) {
+      this.miniBoss.x += this.bossMoveDir * 1.6
+      if (this.miniBoss.x < 2570) {
+        this.bossMoveDir = 1
+      } else if (this.miniBoss.x > 3040) {
+        this.bossMoveDir = -1
+      }
+    }
     this.miniBossLabel.setVisible(true)
     this.miniBossLabel.setPosition(this.miniBoss.x - 50, this.miniBoss.y - 56)
 
@@ -755,10 +787,22 @@ export class LavaBogScene extends Phaser.Scene {
     minion.setVisible(true)
     minion.setCollideWorldBounds(true)
     ;(minion.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    minion.setData('hp', 2)
+    minion.setData('maxHp', 2)
     minion.setVelocityX(Phaser.Math.Between(-90, 90))
+    if (!this.minionHealthBars.has(minion)) {
+      const gfx = this.add.graphics()
+      gfx.setDepth(30)
+      this.minionHealthBars.set(minion, gfx)
+    }
     this.time.delayedCall(3200, () => {
       if (minion.active) {
         minion.disableBody(true, true)
+      }
+      const bar = this.minionHealthBars.get(minion)
+      if (bar) {
+        bar.destroy()
+        this.minionHealthBars.delete(minion)
       }
     })
     this.statusMessage = 'Infix summoned minions!'
@@ -973,8 +1017,18 @@ export class LavaBogScene extends Phaser.Scene {
     }
 
     this.allyLastShotAt = this.time.now
+    if (this.hurricanoRescued && this.hurricanoAlly.active && this.illislimRescued && this.illislimAlly.active) {
+      const useHurricano = Math.floor(this.time.now / this.allyShotCooldownMs) % 2 === 0
+      if (useHurricano) {
+        this.spawnAllyShot(this.hurricanoAlly.x, this.hurricanoAlly.y - 6, 0x9eefff)
+      } else {
+        this.spawnAllyShot(this.illislimAlly.x, this.illislimAlly.y - 6, 0x98ffb4)
+      }
+      return
+    }
     if (this.illislimRescued && this.illislimAlly.active) {
       this.spawnAllyShot(this.illislimAlly.x, this.illislimAlly.y - 6, 0x98ffb4)
+      return
     }
     if (this.hurricanoRescued && this.hurricanoAlly.active) {
       this.spawnAllyShot(this.hurricanoAlly.x, this.hurricanoAlly.y - 6, 0x9eefff)
@@ -995,7 +1049,7 @@ export class LavaBogScene extends Phaser.Scene {
         if (!this.miniBoss.active || this.miniBossDefeated) {
           return
         }
-        this.damageMiniBoss(1)
+        this.damageMiniBoss(0.5)
       },
     })
   }
@@ -1060,9 +1114,29 @@ export class LavaBogScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
+    if (enemy === this.patrolEnemy) {
+      this.patrolEnemyHealth = Math.max(0, this.patrolEnemyHealth - 1)
+      if (this.patrolEnemyHealth <= 0) {
+        enemy.disableBody(true, true)
+        this.statusMessage = 'Enemy down!'
+      } else {
+        this.statusMessage = `Patrol enemy HP: ${this.patrolEnemyHealth}`
+      }
+      this.updateUiText()
+      return
+    }
+    if (enemy === this.lavaBot) {
+      this.lavaBotHealth = Math.max(0, this.lavaBotHealth - 1)
+      if (this.lavaBotHealth <= 0) {
+        enemy.disableBody(true, true)
+        this.statusMessage = 'Lava Bot down!'
+      } else {
+        this.statusMessage = `Lava Bot HP: ${this.lavaBotHealth}`
+      }
+      this.updateUiText()
+      return
+    }
     enemy.disableBody(true, true)
-    this.statusMessage = 'Enemy down!'
-    this.updateUiText()
   }
 
   private handleMiniBossShot(shot: Phaser.Physics.Arcade.Image, enemy: Phaser.Physics.Arcade.Sprite): void {
@@ -1079,7 +1153,7 @@ export class LavaBogScene extends Phaser.Scene {
       return
     }
 
-    this.miniBossHealth -= amount
+    this.miniBossHealth = Math.max(0, this.miniBossHealth - amount)
     this.miniBoss.setTint(0xffc1a4)
     this.time.delayedCall(100, () => {
       if (this.miniBoss.active) {
@@ -1094,7 +1168,7 @@ export class LavaBogScene extends Phaser.Scene {
       this.statusMessage = 'Infix defeated. Rescue path open.'
       this.playTone(260, 0.12)
     } else {
-      this.statusMessage = `Infix HP: ${this.miniBossHealth}`
+      this.statusMessage = `Infix HP: ${this.miniBossHealth.toFixed(1)}`
     }
 
     this.updateUiText()
@@ -1283,13 +1357,111 @@ export class LavaBogScene extends Phaser.Scene {
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
-        `Infix: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth} HP`}`,
+        `Infix: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth.toFixed(1)} HP`}`,
         `Illislim: ${this.illislimRescued ? 'Joined' : 'Missing'}`,
         `Hurricano Man: ${this.hurricanoRescued ? 'Joined' : 'Missing'}`,
         `Bouldereye: ${this.rescueDone ? 'Rescued' : 'Trapped'}`,
         this.statusMessage,
       ].join('\n'),
     )
+  }
+
+  private drawHealthBar(
+    key: string,
+    x: number,
+    y: number,
+    width: number,
+    current: number,
+    max: number,
+    color = 0x7dff7d,
+  ): void {
+    let gfx = this.healthBarGfx.get(key)
+    if (!gfx) {
+      gfx = this.add.graphics()
+      gfx.setDepth(29)
+      this.healthBarGfx.set(key, gfx)
+    }
+    gfx.clear()
+    if (max <= 0 || current <= 0) {
+      return
+    }
+    const ratio = Phaser.Math.Clamp(current / max, 0, 1)
+    gfx.fillStyle(0x000000, 0.65)
+    gfx.fillRect(x - width / 2 - 1, y - 1, width + 2, 7)
+    gfx.fillStyle(0x2e2e2e, 0.85)
+    gfx.fillRect(x - width / 2, y, width, 5)
+    gfx.fillStyle(color, 0.95)
+    gfx.fillRect(x - width / 2, y, Math.max(1, width * ratio), 5)
+  }
+
+  private updateAllHealthBars(): void {
+    this.drawHealthBar('player', this.player.x, this.player.y - 48, 52, this.playerHealth, this.playerMaxHealth, 0x8dff8d)
+
+    if (this.patrolEnemy.active) {
+      this.drawHealthBar(
+        'patrol',
+        this.patrolEnemy.x,
+        this.patrolEnemy.y - 34,
+        42,
+        this.patrolEnemyHealth,
+        this.patrolEnemyMaxHealth,
+        0xffa46b,
+      )
+    } else {
+      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 42, 0, this.patrolEnemyMaxHealth, 0xffa46b)
+    }
+
+    if (this.lavaBot.active) {
+      this.drawHealthBar('lavaBot', this.lavaBot.x, this.lavaBot.y - 34, 42, this.lavaBotHealth, this.lavaBotMaxHealth, 0xffa46b)
+    } else {
+      this.drawHealthBar('lavaBot', this.lavaBot.x, this.lavaBot.y - 34, 42, 0, this.lavaBotMaxHealth, 0xffa46b)
+    }
+
+    if (this.miniBoss.active && !this.miniBossDefeated) {
+      this.drawHealthBar('infix', this.miniBoss.x, this.miniBoss.y - 52, 92, this.miniBossHealth, this.miniBossMaxHealth, 0xff8c70)
+    } else {
+      this.drawHealthBar('infix', this.miniBoss.x, this.miniBoss.y - 52, 92, 0, this.miniBossMaxHealth, 0xff8c70)
+    }
+
+    if (this.illislimRescued && this.illislimAlly.active) {
+      this.drawHealthBar('illislim', this.illislimAlly.x, this.illislimAlly.y - 36, 38, this.allyMaxHealth, this.allyMaxHealth, 0x9effbd)
+    } else {
+      this.drawHealthBar('illislim', 0, 0, 38, 0, this.allyMaxHealth, 0x9effbd)
+    }
+
+    if (this.hurricanoRescued && this.hurricanoAlly.active) {
+      this.drawHealthBar('hurricano', this.hurricanoAlly.x, this.hurricanoAlly.y - 36, 38, this.allyMaxHealth, this.allyMaxHealth, 0x9edfff)
+    } else {
+      this.drawHealthBar('hurricano', 0, 0, 38, 0, this.allyMaxHealth, 0x9edfff)
+    }
+
+    if (this.rescueDone && this.bouldereye.active) {
+      this.drawHealthBar('bouldereye', this.bouldereye.x, this.bouldereye.y - 36, 42, this.bouldereyeMaxHealth, this.bouldereyeMaxHealth, 0xffd18e)
+    } else {
+      this.drawHealthBar('bouldereye', 0, 0, 42, 0, this.bouldereyeMaxHealth, 0xffd18e)
+    }
+
+    for (const [minion, gfx] of this.minionHealthBars.entries()) {
+      gfx.clear()
+      if (!minion.active) {
+        continue
+      }
+      const hp = Number(minion.getData('hp') ?? 0)
+      const maxHp = Number(minion.getData('maxHp') ?? 2)
+      if (hp <= 0) {
+        continue
+      }
+      const ratio = Phaser.Math.Clamp(hp / maxHp, 0, 1)
+      const x = minion.x
+      const y = minion.y - 28
+      const width = 26
+      gfx.fillStyle(0x000000, 0.65)
+      gfx.fillRect(x - width / 2 - 1, y - 1, width + 2, 6)
+      gfx.fillStyle(0x2e2e2e, 0.85)
+      gfx.fillRect(x - width / 2, y, width, 4)
+      gfx.fillStyle(0xffbe86, 0.95)
+      gfx.fillRect(x - width / 2, y, Math.max(1, width * ratio), 4)
+    }
   }
 
   private playTone(freq: number, durationSec = 0.06): void {

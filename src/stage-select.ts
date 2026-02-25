@@ -53,6 +53,7 @@ export class StageSelectScene extends Phaser.Scene {
         'Press 3 for Bloody Hills',
         'Press 4 for Laser Alley',
         'Press 5 for Lava Bog',
+        'Press L for Game Log',
       ].join('\n'),
     )
 
@@ -96,6 +97,7 @@ export class StageSelectScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-FIVE', () =>
       this.tryQueueStage(gameProgress.lavaBogMap, 'Need Map to Lava Bog first.', 'LAVA_BOG', 'lava-bog'),
     )
+    this.input.keyboard?.on('keydown-L', () => this.scene.start('game-log'))
 
     this.refreshProgressText()
   }

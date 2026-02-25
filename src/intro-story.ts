@@ -14,31 +14,34 @@ export class IntroStoryScene extends Phaser.Scene {
       fontSize: '56px',
     })
 
-    this.add.text(70, 122, 'Story Brief', {
+    this.add.text(70, 122, 'Mission Lore Brief', {
       color: '#8ec8ff',
       fontFamily: 'sans-serif',
       fontSize: '30px',
     })
 
     const lines = [
-      'Alarm at HQ. Team deployed: Micralis, Electroman, Inspector Glowman.',
-      'Ship destroyed over a hostile world. Bouldereye is trapped.',
-      'Clear stages, rescue heroes, gather map pieces, and fight through.',
-      'Stage 1: Slippery Slopes  |  Stage 2: Rocky Caverns  |  Stage 3: Bloody Hills',
+      'Alarm at HQ. Deployment team: Micralis, Electroman, Inspector Glowman.',
+      'During insertion, the ship was crushed over a hostile dungeon planet.',
+      'Bouldereye was captured and locked in a vault under Lava Bog.',
+      'Each region holds rescue targets, map pieces, and gate locks to the final chamber.',
+      'Swirl Exanimo, Icemeckel, Volcano Man, Illislim, and Hurricano Man can join the mission.',
+      'Final objective: defeat Infix, break the vault chain, and extract the full team.',
+      'Open the Game Log from Stage Select for discovered lore after each stage.',
     ]
 
-    this.add.text(70, 190, lines.join('\n\n'), {
+    this.add.text(70, 182, lines.join('\n\n'), {
       color: '#d9e7ff',
       fontFamily: 'sans-serif',
-      fontSize: '24px',
+      fontSize: '21px',
       wordWrap: { width: 820 },
-      lineSpacing: 8,
+      lineSpacing: 6,
     })
 
-    this.add.text(70, 490, 'Press Enter to continue to Stage Select', {
+    this.add.text(70, 500, 'Press Enter to continue to Stage Select', {
       color: '#b8c7e6',
       fontFamily: 'sans-serif',
-      fontSize: '22px',
+      fontSize: '20px',
     })
 
     this.input.keyboard?.once('keydown-ENTER', () => this.scene.start('stage-select'))

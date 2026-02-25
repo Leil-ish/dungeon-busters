@@ -15,6 +15,7 @@ import { StageSelectScene } from './stage-select'
 import { HeroSelectScene } from './hero-select'
 import { LaserAlleyScene } from './laser-alley'
 import { LavaBogScene } from './lava-bog'
+import { GameLogScene } from './game-log'
 
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
@@ -695,6 +696,7 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [
     IntroStoryScene,
     StageSelectScene,
+    GameLogScene,
     HeroSelectScene,
     Stage1,
     RockyCavernsScene,
