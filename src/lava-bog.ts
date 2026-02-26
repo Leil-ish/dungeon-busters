@@ -107,6 +107,8 @@ export class LavaBogScene extends Phaser.Scene {
   private chromaforgeFightStarted = false
   private chromaforgeDefeated = false
   private chromaforgeHealth = 22
+  private lastMiniBossHitAt = 0
+  private lastChromaforgeHitAt = 0
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
@@ -1434,8 +1436,14 @@ export class LavaBogScene extends Phaser.Scene {
     if (!this.miniBoss.active || this.miniBossDefeated) {
       return
     }
+    const now = this.time.now
+    if (now - this.lastMiniBossHitAt < 120) {
+      return
+    }
+    this.lastMiniBossHitAt = now
 
-    this.miniBossHealth = Math.max(0, this.miniBossHealth - amount)
+    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
+    this.miniBossHealth = Math.max(0, this.miniBossHealth - clampedDamage)
     this.miniBoss.setTint(0xffc1a4)
     this.time.delayedCall(100, () => {
       if (this.miniBoss.active) {
@@ -1460,7 +1468,13 @@ export class LavaBogScene extends Phaser.Scene {
     if (!this.chromaforge.active || this.chromaforgeDefeated) {
       return
     }
-    this.chromaforgeHealth = Math.max(0, this.chromaforgeHealth - amount)
+    const now = this.time.now
+    if (now - this.lastChromaforgeHitAt < 120) {
+      return
+    }
+    this.lastChromaforgeHitAt = now
+    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
+    this.chromaforgeHealth = Math.max(0, this.chromaforgeHealth - clampedDamage)
     this.chromaforge.setTint(0xffd9f7)
     this.time.delayedCall(100, () => {
       if (this.chromaforge.active) {

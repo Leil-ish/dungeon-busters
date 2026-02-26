@@ -100,6 +100,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private meleeComboStep = 0
   private facingDir = 1
   private bossLastActionAt = 0
+  private lastFusionHitAt = 0
+  private lastConstructHitAt = 0
+  private lastFirstCorruptionHitAt = 0
 
   private readonly normalDragX = 860
   private readonly slipperyDragX = 180
@@ -1055,7 +1058,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     if (!this.fusionActive || !this.fusionSentinel.active || this.mini1Defeated) {
       return
     }
-    this.fusionHp = Math.max(0, this.fusionHp - amount)
+    const now = this.time.now
+    if (now - this.lastFusionHitAt < 110) {
+      return
+    }
+    this.lastFusionHitAt = now
+    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
+    this.fusionHp = Math.max(0, this.fusionHp - clampedDamage)
     if (this.fusionHp <= 0) {
       this.mini1Defeated = true
       this.fusionActive = false
@@ -1069,7 +1078,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     if (!this.constructActive || !this.corruptedConstruct.active || this.mini2Defeated) {
       return
     }
-    this.constructHp = Math.max(0, this.constructHp - amount)
+    const now = this.time.now
+    if (now - this.lastConstructHitAt < 110) {
+      return
+    }
+    this.lastConstructHitAt = now
+    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
+    this.constructHp = Math.max(0, this.constructHp - clampedDamage)
     if (this.constructHp <= 0) {
       this.mini2Defeated = true
       this.constructActive = false
@@ -1083,7 +1098,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     if (!this.finalBossActive || !this.firstCorruption.active || this.finalBossDefeated) {
       return
     }
-    this.firstCorruptionHp = Math.max(0, this.firstCorruptionHp - amount)
+    const now = this.time.now
+    if (now - this.lastFirstCorruptionHitAt < 120) {
+      return
+    }
+    this.lastFirstCorruptionHitAt = now
+    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
+    this.firstCorruptionHp = Math.max(0, this.firstCorruptionHp - clampedDamage)
     if (this.firstCorruptionHp <= 0) {
       this.finalBossDefeated = true
       this.firstCorruption.disableBody(true, true)

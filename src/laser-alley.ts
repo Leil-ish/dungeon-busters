@@ -81,6 +81,7 @@ export class LaserAlleyScene extends Phaser.Scene {
   private stageClearTriggered = false
   private rescueDone = false
   private miniBossDefeated = false
+  private readonly miniBossMaxHealth = 6
   private miniBossHealth = 6
   private isPlayerInvulnerable = false
   private facingDir = 1
@@ -100,6 +101,8 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private statusMessage = 'Navigate Laser Alley and rescue Exemon.'
   private readonly stageName = 'Stage 4: Laser Alley'
+  private healthBarGfx = new Map<string, Phaser.GameObjects.Graphics>()
+  private lastMiniBossHitAt = 0
 
   constructor() {
     super('laser-alley')
@@ -214,6 +217,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
         this.advanceCutscene()
       }
+      this.updateAllHealthBars()
       return
     }
 
@@ -275,6 +279,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     if (pBody.blocked.down && this.player.y > this.LEVEL_H - 36) {
       this.applyDamage(1, 'Fell too far!', true)
     }
+    this.updateAllHealthBars()
   }
 
   private createTextures(): void {
@@ -852,7 +857,13 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    this.miniBossHealth -= 1
+    const now = this.time.now
+    if (now - this.lastMiniBossHitAt < 120) {
+      return
+    }
+    this.lastMiniBossHitAt = now
+    const damage = Math.min(1, Math.max(0.1, this.effectiveStats.damage))
+    this.miniBossHealth = Math.max(0, this.miniBossHealth - damage)
     enemy.setTint(0xff8aa6)
     this.time.delayedCall(100, () => enemy.clearTint())
 
@@ -865,10 +876,65 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.statusMessage = 'Laser Warden defeated. Rescue path open.'
       this.playTone(260, 0.12)
     } else {
-      this.statusMessage = `Laser Warden HP: ${this.miniBossHealth}`
+      this.statusMessage = `Laser Warden HP: ${Math.ceil(this.miniBossHealth)}`
     }
 
     this.updateUiText()
+  }
+
+  private drawHealthBar(
+    key: string,
+    x: number,
+    y: number,
+    width: number,
+    current: number,
+    max: number,
+    color = 0x7dff7d,
+  ): void {
+    let gfx = this.healthBarGfx.get(key)
+    if (!gfx) {
+      gfx = this.add.graphics()
+      gfx.setDepth(29)
+      this.healthBarGfx.set(key, gfx)
+    }
+    gfx.clear()
+    if (max <= 0 || current <= 0) {
+      return
+    }
+    const ratio = Phaser.Math.Clamp(current / max, 0, 1)
+    gfx.fillStyle(0x000000, 0.65)
+    gfx.fillRect(x - width / 2 - 1, y - 1, width + 2, 7)
+    gfx.fillStyle(0x2e2e2e, 0.85)
+    gfx.fillRect(x - width / 2, y, width, 5)
+    gfx.fillStyle(color, 0.95)
+    gfx.fillRect(x - width / 2, y, Math.max(1, width * ratio), 5)
+  }
+
+  private updateAllHealthBars(): void {
+    this.drawHealthBar('player', this.player.x, this.player.y - 48, 52, this.playerHealth, this.playerMaxHealth, 0x8dff8d)
+    if (this.patrolEnemy.active) {
+      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, 1, 1, 0xffa46b)
+    } else {
+      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, 0, 1, 0xffa46b)
+    }
+    if (this.laserBot.active) {
+      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, 1, 1, 0xffa46b)
+    } else {
+      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, 0, 1, 0xffa46b)
+    }
+    if (this.miniBoss.active && !this.miniBossDefeated) {
+      this.drawHealthBar(
+        'laser-warden',
+        this.miniBoss.x,
+        this.miniBoss.y - 56,
+        84,
+        this.miniBossHealth,
+        this.miniBossMaxHealth,
+        0xff8c70,
+      )
+    } else {
+      this.drawHealthBar('laser-warden', this.miniBoss.x, this.miniBoss.y - 56, 84, 0, this.miniBossMaxHealth, 0xff8c70)
+    }
   }
 
   private tryUseHeroAbility(): void {
@@ -1042,7 +1108,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
-        `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth} HP`}`,
+        `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${Math.ceil(this.miniBossHealth)} HP`}`,
         `Exemon: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         this.statusMessage,
