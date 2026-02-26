@@ -42,16 +42,16 @@ export class StageSelectScene extends Phaser.Scene {
       lineSpacing: 6,
     })
 
-    this.controlsText = this.add.text(80, viewportH - 128, '', {
+    this.controlsText = this.add.text(80, 0, '', {
       color: '#b2c5e9',
       fontFamily: 'sans-serif',
       fontSize: '16px',
       lineSpacing: 2,
     })
-    this.controlsText.setOrigin(0, 1)
+    this.controlsText.setOrigin(0, 0)
     this.controlsText.setText('Keys: 1-6 = Stages, L = Game Log')
 
-    this.statusText = this.add.text(80, viewportH - 56, '', {
+    this.statusText = this.add.text(80, 0, '', {
       color: '#ffdca8',
       fontFamily: 'sans-serif',
       fontSize: '15px',
@@ -63,6 +63,10 @@ export class StageSelectScene extends Phaser.Scene {
       fontSize: '13px',
     })
     helperText.setOrigin(0, 1)
+
+    const controlsY = Math.min(viewportH - 82, this.leftColumnText.y + this.leftColumnText.height + 22)
+    this.controlsText.setY(controlsY)
+    this.statusText.setY(Math.min(viewportH - 44, controlsY + this.controlsText.height + 6))
 
     this.input.keyboard?.on('keydown-ONE', () => this.queueHeroSelect('SLIPPERY_HILLS', 'stage1'))
     this.input.keyboard?.on('keydown-TWO', () =>
