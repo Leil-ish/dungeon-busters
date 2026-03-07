@@ -50,12 +50,18 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private constructActive = false
   private finalBossActive = false
 
-  private fusionHp = 12
-  private readonly fusionMaxHp = 12
-  private constructHp = 16
-  private readonly constructMaxHp = 16
-  private firstCorruptionHp = 36
-  private readonly firstCorruptionMaxHp = 36
+  private fusionHp = 30
+  private readonly fusionMaxHp = 30
+  private constructHp = 36
+  private readonly constructMaxHp = 36
+  private firstCorruptionHp = 72
+  private readonly firstCorruptionMaxHp = 72
+  private fusionHitCount = 0
+  private constructHitCount = 0
+  private firstCorruptionHitCount = 0
+  private readonly fusionRequiredHits = 34
+  private readonly constructRequiredHits = 42
+  private readonly firstCorruptionRequiredHits = 96
 
   private finalBossDefeated = false
   private finalBossAbsorbActive = false
@@ -66,9 +72,11 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private timedLasers: TimedLaser[] = []
   private slipperyZones: Phaser.Geom.Rectangle[] = []
+  private pitZones: Phaser.Geom.Rectangle[] = []
   private section2Triggered = false
   private section3Triggered = false
   private finalTriggered = false
+  private finalSpawnQueued = false
   private matterBridgeBuilt = false
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
@@ -78,6 +86,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private kickKey!: Phaser.Input.Keyboard.Key
 
   private uiText!: Phaser.GameObjects.Text
+  private exitPortal: Phaser.GameObjects.Rectangle | null = null
+  private exitPortalActive = false
+  private lastPortalPromptAt = 0
   private cutscenePanel!: Phaser.GameObjects.Rectangle
   private cutsceneText!: Phaser.GameObjects.Text
   private cutsceneLines: string[] = []
@@ -142,6 +153,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.createPlayerAndEnemies()
     this.createWeapons()
     this.createHazards()
+    this.createExitPortal()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.fireKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
@@ -187,8 +199,28 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.checkHazards()
     this.updateHealthBars()
 
-    if (this.finalBossActive && !this.finalBossDefeated && !this.firstCorruption.active) {
-      this.finalBossDefeated = true
+    // Fail-safe: if the second mini-boss is defeated, force Exomon spawn even if position triggers were skipped.
+    if (this.mini2Defeated && !this.finalBossActive && !this.finalBossDefeated && !this.finalSpawnQueued) {
+      this.finalSpawnQueued = true
+      this.time.delayedCall(350, () => {
+        if (!this.finalBossActive && !this.finalBossDefeated) {
+          this.finalTriggered = true
+          this.startFinalBossSequence()
+        }
+      })
+    }
+
+    if (this.exitPortal && this.physics.overlap(this.player, this.exitPortal) && !this.stageClearTriggered) {
+      if (this.exitPortalActive) {
+        this.completeStage()
+      } else if (this.time.now - this.lastPortalPromptAt > 900) {
+        this.lastPortalPromptAt = this.time.now
+        this.statusMessage = 'Exit locked. Defeat Exomon first.'
+        this.updateUiText()
+      }
+    }
+
+    if (this.finalBossDefeated && !this.stageClearTriggered) {
       this.finishStage()
     }
   }
@@ -224,6 +256,19 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       gfx.generateTexture('energy-pulse', 44, 44)
     }
 
+    if (!this.textures.exists('exomon-boss-block')) {
+      gfx.clear()
+      gfx.fillStyle(0xb35cff, 1)
+      gfx.fillRect(0, 0, 96, 96)
+      gfx.fillStyle(0x1b0e2a, 1)
+      gfx.fillRect(10, 14, 76, 68)
+      gfx.fillStyle(0xffa7de, 1)
+      gfx.fillRect(20, 26, 18, 18)
+      gfx.fillRect(58, 26, 18, 18)
+      gfx.fillRect(32, 56, 32, 10)
+      gfx.generateTexture('exomon-boss-block', 96, 96)
+    }
+
     gfx.destroy()
   }
 
@@ -247,37 +292,42 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private buildGeometry(): void {
     const defs: Array<[number, number, number, number, number]> = [
-      [220, 860, 420, 80, 0x3c3554],
-      [720, 860, 280, 80, 0x3c3554],
-      [1130, 860, 220, 80, 0x3c3554],
-      [1450, 860, 220, 80, 0x3c3554],
-      [1750, 860, 220, 80, 0x3c3554],
-      [2050, 860, 220, 80, 0x3c3554],
-      [2350, 860, 220, 80, 0x3c3554],
-      [2660, 860, 220, 80, 0x3c3554],
-      [2960, 860, 220, 80, 0x3c3554],
-      [3260, 860, 220, 80, 0x3c3554],
-      [3560, 860, 220, 80, 0x3c3554],
-      [3880, 860, 220, 80, 0x3c3554],
-      [4200, 860, 220, 80, 0x3c3554],
+      // Section A: Ground run
+      [250, 860, 500, 80, 0x3c3554],
+      [810, 860, 420, 80, 0x3c3554],
+      [1260, 860, 260, 80, 0x3c3554],
 
-      [900, 720, 180, 24, 0x6872b5],
-      [1130, 670, 180, 24, 0x6872b5],
-      [1360, 620, 180, 24, 0x6872b5],
+      // Section B: Platform traversal 1 (pit below)
+      [1600, 760, 220, 24, 0x6872b5],
+      [1880, 700, 220, 24, 0x6872b5],
+      [2160, 640, 220, 24, 0x6872b5],
+      [2440, 700, 220, 24, 0x6872b5],
+      [2720, 760, 220, 24, 0x6872b5],
 
-      [1860, 700, 190, 24, 0x7a5fbf],
-      [2120, 650, 170, 24, 0x7a5fbf],
-      [2380, 600, 170, 24, 0x7a5fbf],
-      [2620, 560, 170, 24, 0x7a5fbf],
+      // Section C: Ground reset
+      [3060, 860, 420, 80, 0x3c3554],
+      [3520, 860, 380, 80, 0x3c3554],
 
-      [3180, 650, 190, 24, 0x7f89d6],
-      [3400, 600, 170, 24, 0x7f89d6],
-      [3620, 550, 170, 24, 0x7f89d6],
-      [3840, 500, 180, 24, 0x7f89d6],
-      [4080, 450, 220, 24, 0x7f89d6],
+      // Section D: Final ascent (pit below)
+      [3840, 760, 220, 24, 0x7a5fbf],
+      [4060, 710, 220, 24, 0x7a5fbf],
+      [4280, 660, 220, 24, 0x7a5fbf],
+
+      // Section E: Boss arena
+      [4280, 860, 180, 80, 0x3c3554],
+      [4440, 860, 320, 80, 0x3c3554],
+      [4380, 740, 180, 24, 0x7f89d6],
     ]
 
     this.platforms = defs.map(([x, y, w, h, color]) => this.createStaticPlatform(x, y, w, h, color))
+
+    // Platform-only sections: falling here causes pit damage + respawn.
+    this.pitZones = [this.createPitZone(2160, 872, 1320, 56), this.createPitZone(4060, 872, 440, 56)]
+  }
+
+  private createPitZone(centerX: number, centerY: number, width: number, height: number): Phaser.Geom.Rectangle {
+    this.add.rectangle(centerX, centerY, width, height, 0x120000, 0.28)
+    return new Phaser.Geom.Rectangle(centerX - width / 2, centerY - height / 2, width, height)
   }
 
   private createPlayerAndEnemies(): void {
@@ -299,8 +349,11 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       enemy.setImmovable(true)
       enemy.setCollideWorldBounds(true)
       ;(enemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-      enemy.setData('hp', 4)
-      enemy.setData('maxHp', 4)
+      enemy.setData('hp', 16)
+      enemy.setData('maxHp', 16)
+      enemy.setData('hitCount', 0)
+      enemy.setData('requiredHits', 22)
+      enemy.setData('lastHitAt', 0)
       enemy.setData('patrolMin', minX)
       enemy.setData('patrolMax', maxX)
       enemy.setData('speed', 60)
@@ -311,11 +364,11 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       return enemy
     }
 
-    spawnEnemy(980, 688, 900, 1120)
-    spawnEnemy(2050, 618, 1960, 2180)
-    spawnEnemy(3370, 568, 3320, 3540)
+    spawnEnemy(980, 798, 900, 1120)
+    spawnEnemy(2160, 606, 2060, 2260)
+    spawnEnemy(3440, 798, 3340, 3540)
 
-    this.fusionSentinel = this.physics.add.sprite(1600, 620, enemyTexture)
+    this.fusionSentinel = this.physics.add.sprite(1940, 600, enemyTexture)
     this.fusionSentinel.setScale(1.2)
     this.fusionSentinel.setTint(0x95f0ff)
     this.fusionSentinel.setImmovable(true)
@@ -326,7 +379,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.physics.add.collider(this.fusionSentinel, this.platforms)
     this.physics.add.overlap(this.player, this.fusionSentinel, () => this.applyDamage(1, 'Fusion Sentinel hit!'))
 
-    this.corruptedConstruct = this.physics.add.sprite(2920, 560, enemyTexture)
+    this.corruptedConstruct = this.physics.add.sprite(3920, 650, enemyTexture)
     this.corruptedConstruct.setDisplaySize(140, 140)
     this.corruptedConstruct.setTint(0xc3a5ff)
     this.corruptedConstruct.setImmovable(true)
@@ -338,10 +391,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.physics.add.collider(this.corruptedConstruct, this.platforms)
     this.physics.add.overlap(this.player, this.corruptedConstruct, () => this.applyDamage(1, 'Corrupted Construct impact!'))
 
-    const finalTexture = this.textures.exists('boss-chromaforge') ? 'boss-chromaforge' : enemyTexture
-    this.firstCorruption = this.physics.add.sprite(4220, 350, finalTexture)
-    this.firstCorruption.setDisplaySize(220, 220)
-    this.firstCorruption.setTint(0xff95c6)
+    const finalTexture = this.textures.exists('hero-exemon') ? 'hero-exemon' : 'exomon-boss-block'
+    this.firstCorruption = this.physics.add.sprite(4380, 740, finalTexture)
+    this.firstCorruption.setDisplaySize(196, 196)
     this.firstCorruption.setImmovable(true)
     this.firstCorruption.setCollideWorldBounds(true)
     ;(this.firstCorruption.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
@@ -349,7 +401,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.firstCorruption.setData('hp', this.firstCorruptionHp)
     this.firstCorruption.disableBody(true, true)
     this.physics.add.collider(this.firstCorruption, this.platforms)
-    this.physics.add.overlap(this.player, this.firstCorruption, () => this.applyDamage(2, 'The First Corruption struck!'))
+    this.physics.add.overlap(this.player, this.firstCorruption, () => this.applyDamage(2, 'Exomon struck!'))
   }
 
   private createWeapons(): void {
@@ -378,9 +430,14 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       shot.disableBody(true, true)
     })
 
-    this.physics.add.collider(this.rocks, this.platforms, (obj1) => {
-      const rock = obj1 as Phaser.Physics.Arcade.Image
-      this.time.delayedCall(280, () => rock.disableBody(true, true))
+    this.physics.add.collider(this.rocks, this.platforms, (obj1, obj2) => {
+      const maybeRock1 = obj1 as Phaser.GameObjects.GameObject & { disableBody?: (disableGameObject?: boolean, hideGameObject?: boolean) => void }
+      const maybeRock2 = obj2 as Phaser.GameObjects.GameObject & { disableBody?: (disableGameObject?: boolean, hideGameObject?: boolean) => void }
+      const rock = typeof maybeRock1.disableBody === 'function' ? maybeRock1 : typeof maybeRock2.disableBody === 'function' ? maybeRock2 : null
+      if (!rock) {
+        return
+      }
+      this.time.delayedCall(280, () => rock.disableBody?.(true, true))
     })
 
     this.physics.add.overlap(this.player, this.enemyShots, () => this.applyDamage(1, 'Energy hit!'))
@@ -394,12 +451,50 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         return
       }
       shot.disableBody(true, true)
-      const hp = Math.max(0, Number(minion.getData('hp') ?? 1) - 1)
+      const now = this.time.now
+      const lastHitAt = Number(minion.getData('lastHitAt') ?? 0)
+      if (now - lastHitAt < 400) {
+        return
+      }
+      minion.setData('lastHitAt', now)
+      const hitCount = Number(minion.getData('hitCount') ?? 0) + 1
+      const requiredHits = Number(minion.getData('requiredHits') ?? 10)
+      minion.setData('hitCount', hitCount)
+      const hpMax = Number(minion.getData('maxHp') ?? 1)
+      const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
+      const hp = hpMax * ratio
       minion.setData('hp', hp)
-      if (hp <= 0) {
+      if (hitCount >= requiredHits || hp <= 0) {
         minion.disableBody(true, true)
       }
     })
+
+    for (const enemy of this.commonEnemies) {
+      this.physics.add.overlap(this.shots, enemy, (shotObj, enemyObj) => {
+        const shot = shotObj as Phaser.Physics.Arcade.Image
+        const target = enemyObj as EnemyUnit
+        if (!target.active) {
+          return
+        }
+        shot.disableBody(true, true)
+        const now = this.time.now
+        const lastHitAt = Number(target.getData('lastHitAt') ?? 0)
+      if (now - lastHitAt < 400) {
+        return
+      }
+        target.setData('lastHitAt', now)
+        const hitCount = Number(target.getData('hitCount') ?? 0) + 1
+        const requiredHits = Number(target.getData('requiredHits') ?? 10)
+        target.setData('hitCount', hitCount)
+        const hpMax = Number(target.getData('maxHp') ?? 1)
+        const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
+        const hp = hpMax * ratio
+        target.setData('hp', hp)
+        if (hitCount >= requiredHits || hp <= 0) {
+          target.disableBody(true, true)
+        }
+      })
+    }
 
     this.physics.add.overlap(this.shots, this.fusionSentinel, (shotObj) => {
       if (!this.fusionActive || !this.fusionSentinel.active) {
@@ -460,6 +555,15 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         })
       },
     })
+  }
+
+  private createExitPortal(): void {
+    this.exitPortal = this.add.rectangle(this.LEVEL_W - 120, 760, 56, 96, 0xa7e2ff, 0.25)
+    this.exitPortal.setStrokeStyle(2, 0xffb0b0, 0.9)
+    this.exitPortal.setFillStyle(0xff6a6a, 0.35)
+    this.exitPortal.setVisible(true)
+    this.exitPortal.setDepth(35)
+    this.physics.add.existing(this.exitPortal, true)
   }
 
   private updatePlayerMovement(): void {
@@ -529,7 +633,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         shot.setActive(true)
         shot.setVisible(true)
         shot.setVelocity(vx, vy)
-        this.time.delayedCall(950, () => shot.disableBody(true, true))
+        this.time.delayedCall(950, () => shot.disableBody?.(true, true))
       }
       this.statusMessage = 'Triple Spectrum Shot!'
       this.playTone(620, 0.05)
@@ -548,7 +652,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     shot.setActive(true)
     shot.setVisible(true)
     shot.setVelocityX(this.facingDir * this.effectiveStats.shotSpeed)
-    this.time.delayedCall(950, () => shot.disableBody(true, true))
+    this.time.delayedCall(950, () => shot.disableBody?.(true, true))
   }
 
   private useSpecialAbility(): void {
@@ -650,9 +754,20 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       } else if (target === this.firstCorruption) {
         this.damageFirstCorruption(damage)
       } else {
-        const hp = Math.max(0, Number(target.getData('hp') ?? 1) - damage)
+        const now = this.time.now
+        const lastHitAt = Number(target.getData('lastHitAt') ?? 0)
+        if (now - lastHitAt < 400) {
+          continue
+        }
+        target.setData('lastHitAt', now)
+        const hitCount = Number(target.getData('hitCount') ?? 0) + 1
+        const requiredHits = Number(target.getData('requiredHits') ?? 10)
+        target.setData('hitCount', hitCount)
+        const hpMax = Number(target.getData('maxHp') ?? 1)
+        const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
+        const hp = hpMax * ratio
         target.setData('hp', hp)
-        if (hp <= 0) {
+        if (hitCount >= requiredHits || hp <= 0) {
           target.disableBody(true, true)
         }
       }
@@ -736,9 +851,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     const phase = this.getFinalBossPhase()
     const speed = phase === 1 ? 1.5 : phase === 2 ? 2.1 : 2.8
     this.firstCorruption.x += this.chromaforgeDirection() * speed
-    if (this.firstCorruption.x < 3980) {
+    if (this.firstCorruption.x < 4020) {
       this.firstCorruption.setData('dir', 1)
-    } else if (this.firstCorruption.x > 4440) {
+    } else if (this.firstCorruption.x > 4480) {
       this.firstCorruption.setData('dir', -1)
     }
 
@@ -789,7 +904,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       },
       onComplete: () => wave.destroy(),
     })
-    this.statusMessage = 'The First Corruption: shockwave!'
+    this.statusMessage = 'Exomon: shockwave!'
     this.updateUiText()
   }
 
@@ -806,16 +921,16 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       shot.setActive(true)
       shot.setVisible(true)
       shot.setVelocity(Math.cos(angle) * 250, Math.sin(angle) * 250)
-      this.time.delayedCall(1700, () => shot.disableBody(true, true))
+      this.time.delayedCall(1700, () => shot.disableBody?.(true, true))
     }
-    this.statusMessage = 'The First Corruption: beam spread!'
+    this.statusMessage = 'Exomon: beam spread!'
     this.updateUiText()
   }
 
   private firstCorruptionAbsorbAttempt(): void {
     this.finalBossAbsorbActive = true
     this.finalBossAbsorbInterrupted = false
-    this.statusMessage = 'The First Corruption is absorbing energy! Use Solar Bind!'
+    this.statusMessage = 'Exomon is absorbing energy! Use Solar Bind!'
     this.updateUiText()
 
     const ring = this.add.circle(this.firstCorruption.x, this.firstCorruption.y, 24, 0xffd1ef, 0.42)
@@ -856,7 +971,11 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     minion.setVisible(true)
     minion.setCollideWorldBounds(true)
     ;(minion.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    minion.setData('hp', 3)
+    minion.setData('hp', 8)
+    minion.setData('maxHp', 8)
+    minion.setData('hitCount', 0)
+    minion.setData('requiredHits', 10)
+    minion.setData('lastHitAt', 0)
     minion.setVelocityX(Phaser.Math.Between(-110, 110))
     this.physics.add.collider(minion, this.platforms)
 
@@ -882,7 +1001,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       shot.setActive(true)
       shot.setVisible(true)
       shot.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed)
-      this.time.delayedCall(1500, () => shot.disableBody(true, true))
+      this.time.delayedCall(1500, () => shot.disableBody?.(true, true))
     }
   }
 
@@ -905,7 +1024,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         rock.setVisible(true)
         rock.setVelocity(Phaser.Math.Between(-20, 20), 20)
         rock.setGravityY(900)
-        this.time.delayedCall(2600, () => rock.disableBody(true, true))
+        this.time.delayedCall(2600, () => rock.disableBody?.(true, true))
       },
     })
   }
@@ -937,6 +1056,12 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private checkHazards(): void {
     const pBounds = this.player.getBounds()
+    for (const pit of this.pitZones) {
+      if (Phaser.Geom.Intersects.RectangleToRectangle(pBounds, pit)) {
+        this.applyDamage(1, 'Fell into a void pit!', true)
+        return
+      }
+    }
     for (const laser of this.timedLasers) {
       if (laser.active && Phaser.Geom.Intersects.RectangleToRectangle(pBounds, laser.bounds)) {
         this.applyDamage(1, 'Laser hazard!')
@@ -946,12 +1071,12 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private updateSectionTriggers(): void {
-    if (!this.section2Triggered && this.player.x > 1450) {
+    if (!this.section2Triggered && this.player.x > 1500) {
       this.section2Triggered = true
       this.startFusionSentinelEncounter()
     }
 
-    if (!this.section3Triggered && this.player.x > 2860) {
+    if (!this.section3Triggered && (this.player.x > 2800 || this.mini1Defeated)) {
       this.section3Triggered = true
       this.startMatterBridgeSequence()
     }
@@ -960,11 +1085,18 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       this.finalTriggered = true
       this.startFinalBossSequence()
     }
+    if (!this.finalTriggered && this.player.x > 4320) {
+      this.finalTriggered = true
+      this.startFinalBossSequence()
+    }
   }
 
   private startFusionSentinelEncounter(): void {
     this.fusionActive = true
-    this.fusionSentinel.enableBody(true, 1600, 620, true, true)
+    this.fusionHp = this.fusionMaxHp
+    this.fusionHitCount = 0
+    this.lastFusionHitAt = 0
+    this.fusionSentinel.enableBody(true, 1940, 600, true, true)
     this.startDialogue(
       [
         'Mini-Boss: Fusion Sentinel',
@@ -1003,9 +1135,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
     this.matterBridgeBuilt = true
     const bridge: Array<[number, number, number, number, number]> = [
-      [3450, 640, 150, 20, 0x9cd1ff],
-      [3610, 612, 150, 20, 0x9cd1ff],
-      [3770, 586, 150, 20, 0x9cd1ff],
+      [3720, 790, 150, 20, 0x9cd1ff],
+      [3900, 750, 150, 20, 0x9cd1ff],
+      [4080, 710, 150, 20, 0x9cd1ff],
     ]
     bridge.forEach(([x, y, w, h, c]) => {
       const p = this.createStaticPlatform(x, y, w, h, c)
@@ -1023,7 +1155,10 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private startCorruptedConstructEncounter(): void {
     this.constructActive = true
-    this.corruptedConstruct.enableBody(true, 2920, 560, true, true)
+    this.constructHp = this.constructMaxHp
+    this.constructHitCount = 0
+    this.lastConstructHitAt = 0
+    this.corruptedConstruct.enableBody(true, 3920, 650, true, true)
     this.startDialogue(
       [
         'Mini-Boss: Corrupted Construct',
@@ -1038,34 +1173,46 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private startFinalBossSequence(): void {
+    if (this.finalBossActive || this.finalBossDefeated) {
+      return
+    }
     this.finalBossActive = true
-    this.firstCorruption.enableBody(true, 4220, 350, true, true)
+    this.finalBossDefeated = false
+    this.firstCorruptionHp = this.firstCorruptionMaxHp
+    this.firstCorruptionHitCount = 0
+    this.lastFirstCorruptionHitAt = 0
+    const spawnX = Phaser.Math.Clamp(this.player.x + 260, 3940, 4380)
+    this.firstCorruption.enableBody(true, spawnX, 740, true, true)
+    this.firstCorruption.setVisible(true)
+    this.firstCorruption.setActive(true)
+    this.firstCorruption.setDepth(40)
     this.startDialogue(
       [
-        'Final Boss: The First Corruption',
+        'Final Boss: Exomon',
         'Phase 1: shockwaves. Phase 2: beam spreads. Phase 3: absorb cycles.',
         'Use Solar Bind to interrupt absorption.',
         'Press Space to begin the final battle.',
       ],
       () => {
-        this.statusMessage = 'The First Corruption engaged.'
+        this.statusMessage = 'Exomon engaged.'
         this.updateUiText()
       },
     )
   }
 
-  private damageFusionSentinel(amount: number): void {
+  private damageFusionSentinel(_amount: number): void {
     if (!this.fusionActive || !this.fusionSentinel.active || this.mini1Defeated) {
       return
     }
     const now = this.time.now
-    if (now - this.lastFusionHitAt < 110) {
+    if (now - this.lastFusionHitAt < 360) {
       return
     }
     this.lastFusionHitAt = now
-    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
-    this.fusionHp = Math.max(0, this.fusionHp - clampedDamage)
-    if (this.fusionHp <= 0) {
+    this.fusionHitCount += 1
+    const ratio = Phaser.Math.Clamp(1 - this.fusionHitCount / this.fusionRequiredHits, 0, 1)
+    this.fusionHp = this.fusionMaxHp * ratio
+    if (this.fusionHitCount >= this.fusionRequiredHits) {
       this.mini1Defeated = true
       this.fusionActive = false
       this.fusionSentinel.disableBody(true, true)
@@ -1074,38 +1221,44 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
   }
 
-  private damageCorruptedConstruct(amount: number): void {
+  private damageCorruptedConstruct(_amount: number): void {
     if (!this.constructActive || !this.corruptedConstruct.active || this.mini2Defeated) {
       return
     }
     const now = this.time.now
-    if (now - this.lastConstructHitAt < 110) {
+    if (now - this.lastConstructHitAt < 360) {
       return
     }
     this.lastConstructHitAt = now
-    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
-    this.constructHp = Math.max(0, this.constructHp - clampedDamage)
-    if (this.constructHp <= 0) {
+    this.constructHitCount += 1
+    const ratio = Phaser.Math.Clamp(1 - this.constructHitCount / this.constructRequiredHits, 0, 1)
+    this.constructHp = this.constructMaxHp * ratio
+    if (this.constructHitCount >= this.constructRequiredHits) {
       this.mini2Defeated = true
       this.constructActive = false
       this.corruptedConstruct.disableBody(true, true)
       this.statusMessage = 'Corrupted Construct defeated. Final chamber unlocked.'
+      if (!this.finalTriggered) {
+        this.finalTriggered = true
+        this.time.delayedCall(450, () => this.startFinalBossSequence())
+      }
       this.updateUiText()
     }
   }
 
-  private damageFirstCorruption(amount: number): void {
+  private damageFirstCorruption(_amount: number): void {
     if (!this.finalBossActive || !this.firstCorruption.active || this.finalBossDefeated) {
       return
     }
     const now = this.time.now
-    if (now - this.lastFirstCorruptionHitAt < 120) {
+    if (now - this.lastFirstCorruptionHitAt < 420) {
       return
     }
     this.lastFirstCorruptionHitAt = now
-    const clampedDamage = Phaser.Math.Clamp(amount, 0.1, 1)
-    this.firstCorruptionHp = Math.max(0, this.firstCorruptionHp - clampedDamage)
-    if (this.firstCorruptionHp <= 0) {
+    this.firstCorruptionHitCount += 1
+    const ratio = Phaser.Math.Clamp(1 - this.firstCorruptionHitCount / this.firstCorruptionRequiredHits, 0, 1)
+    this.firstCorruptionHp = this.firstCorruptionMaxHp * ratio
+    if (this.firstCorruptionHitCount >= this.firstCorruptionRequiredHits) {
       this.finalBossDefeated = true
       this.firstCorruption.disableBody(true, true)
       this.finishStage()
@@ -1114,24 +1267,47 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private finishStage(): void {
+    if (this.stageClearTriggered || this.exitPortalActive) {
+      return
+    }
+    this.exitPortalActive = true
+    if (this.exitPortal) {
+      this.exitPortal.setPosition(Phaser.Math.Clamp(this.firstCorruption.x + 80, 4040, this.LEVEL_W - 120), 790)
+      this.exitPortal.setVisible(true)
+      this.exitPortal.setStrokeStyle(2, 0xd7f2ff, 0.9)
+      this.exitPortal.setFillStyle(0xa7e2ff, 0.6)
+      this.tweens.add({
+        targets: this.exitPortal,
+        alpha: { from: 0.35, to: 0.9 },
+        duration: 560,
+        yoyo: true,
+        repeat: -1,
+      })
+    }
+    this.startDialogue(
+      [
+        'Exomon has fallen.',
+        'Chromaforge: The forge remembers.',
+        'Chromaforge: The trials were never the end.',
+        'Exit portal opened. Reach it to clear Stage 6.',
+      ],
+      () => {
+        this.statusMessage = 'Portal active. Move to extraction.'
+        this.updateUiText()
+      },
+    )
+  }
+
+  private completeStage(): void {
     if (this.stageClearTriggered) {
       return
     }
     this.stageClearTriggered = true
     gameProgress.forgeOfOriginsCleared = true
     saveGameProgress()
-
-    this.startDialogue(
-      [
-        'The First Corruption has fallen.',
-        'Chromaforge: The forge remembers.',
-        'Chromaforge: The trials were never the end.',
-        'STAGE CLEAR - Press Space.',
-      ],
-      () => {
-        this.scene.start('stage-select')
-      },
-    )
+    this.startDialogue(['STAGE CLEAR - Press Space.'], () => {
+      this.scene.start('stage-select')
+    })
   }
 
   private applyDamage(amount: number, message: string, forceRespawn = false): void {
@@ -1232,7 +1408,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         `HP: ${hp}`,
         `Fusion Sentinel: ${this.mini1Defeated ? 'Defeated' : `${this.fusionHp.toFixed(1)} HP`}`,
         `Corrupted Construct: ${this.mini2Defeated ? 'Defeated' : `${this.constructHp.toFixed(1)} HP`}`,
-        `The First Corruption: ${this.finalBossDefeated ? 'Defeated' : `${this.firstCorruptionHp.toFixed(1)} HP`}`,
+        `Exomon: ${this.finalBossDefeated ? 'Defeated' : this.finalBossActive ? `${this.firstCorruptionHp.toFixed(1)} HP` : 'Not Spawned'}`,
         this.statusMessage,
       ].join('\n'),
     )
@@ -1265,7 +1441,17 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       const enemy = this.commonEnemies[i]
       const hp = Number(enemy.getData('hp') ?? 0)
       const max = Number(enemy.getData('maxHp') ?? 4)
-      this.drawBar(`enemy-${i}`, enemy.x, enemy.y - 30, 32, enemy.active ? hp : 0, max, 0xffb18b)
+      const key = `enemy-${i}`
+      if (!enemy.active || hp <= 0) {
+        const gfx = this.healthBars.get(key)
+        if (gfx) {
+          gfx.clear()
+          gfx.destroy()
+          this.healthBars.delete(key)
+        }
+        continue
+      }
+      this.drawBar(key, enemy.x, enemy.y - 30, 32, hp, max, 0xffb18b)
     }
 
     this.drawBar('fusion', this.fusionSentinel.x, this.fusionSentinel.y - 48, 80, this.fusionActive ? this.fusionHp : 0, this.fusionMaxHp, 0x9be8ff)
@@ -1288,14 +1474,19 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       0xff9fca,
     )
 
+    const staleMinions: EnemyUnit[] = []
     for (const [minion, gfx] of this.minionBars.entries()) {
       gfx.clear()
       if (!minion.active) {
+        gfx.destroy()
+        staleMinions.push(minion)
         continue
       }
       const hp = Number(minion.getData('hp') ?? 0)
       const max = Number(minion.getData('maxHp') ?? 3)
       if (hp <= 0) {
+        gfx.destroy()
+        staleMinions.push(minion)
         continue
       }
       const ratio = Phaser.Math.Clamp(hp / max, 0, 1)
@@ -1307,6 +1498,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       gfx.fillRect(minion.x - width / 2, y, width, 4)
       gfx.fillStyle(0xffc08e, 0.95)
       gfx.fillRect(minion.x - width / 2, y, Math.max(1, width * ratio), 4)
+    }
+    for (const minion of staleMinions) {
+      this.minionBars.delete(minion)
     }
 
     this.bossMinions.children.each((obj) => {

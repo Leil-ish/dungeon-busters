@@ -311,8 +311,8 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
   },
   SWIRL_EXANIMO: {
     id: 'SWIRL_EXANIMO',
-    displayName: 'Exemon',
-    textureKey: 'hero-exemon',
+    displayName: 'Swirl Exanimo',
+    textureKey: 'hero-swirl-exanimo',
     specialAbility: 'FUSION_WAVE',
     superAbility: 'ELEMENTAL_SPIRAL',
     tuning: { speedMul: 1.03, jumpMul: 1.04, damageMul: 1.01, defenseMul: 0.99, cooldownMul: 1.18, shotSpeedMul: 1.02 },

@@ -81,8 +81,8 @@ export class LaserAlleyScene extends Phaser.Scene {
   private stageClearTriggered = false
   private rescueDone = false
   private miniBossDefeated = false
-  private readonly miniBossMaxHealth = 6
-  private miniBossHealth = 6
+  private readonly miniBossMaxHealth = 14
+  private miniBossHealth = 14
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
@@ -99,7 +99,7 @@ export class LaserAlleyScene extends Phaser.Scene {
   private healthPickup: Phaser.GameObjects.Rectangle | null = null
   private powerPickup: Phaser.GameObjects.Rectangle | null = null
 
-  private statusMessage = 'Navigate Laser Alley and rescue Exemon.'
+  private statusMessage = 'Navigate Laser Alley and secure the map route.'
   private readonly stageName = 'Stage 4: Laser Alley'
   private healthBarGfx = new Map<string, Phaser.GameObjects.Graphics>()
   private lastMiniBossHitAt = 0
@@ -153,6 +153,9 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.patrolEnemy.setCollideWorldBounds(true)
     this.patrolEnemy.setImmovable(true)
     ;(this.patrolEnemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.patrolEnemy.setData('hp', 4)
+    this.patrolEnemy.setData('maxHp', 4)
+    this.patrolEnemy.setData('lastHitAt', 0)
     this.patrolEnemy.setVelocityX(-this.patrolSpeed)
     this.physics.add.collider(this.patrolEnemy, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.patrolEnemy, () => this.applyDamage(1, 'Enemy hit! Try again.'))
@@ -161,6 +164,9 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.laserBot.setImmovable(true)
     this.laserBot.setCollideWorldBounds(true)
     ;(this.laserBot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.laserBot.setData('hp', 5)
+    this.laserBot.setData('maxHp', 5)
+    this.laserBot.setData('lastHitAt', 0)
     this.physics.add.collider(this.laserBot, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.laserBot, () => this.applyDamage(1, 'Laser Bot contact!'))
 
@@ -483,11 +489,8 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.prismCell = this.add.rectangle(2790, 450, 90, 140, 0x8ca4ff, 0.38)
     this.prismCell.setStrokeStyle(3, 0xd8e4ff, 0.9)
 
-    const swirlTexture = this.textures.exists('hero-exemon') ? 'hero-exemon' : 'player-block'
+    const swirlTexture = this.textures.exists('hero-swirl-exanimo') ? 'hero-swirl-exanimo' : 'player-block'
     this.swirlExanimo = this.physics.add.sprite(2790, 450, swirlTexture)
-    if (swirlTexture === 'hero-exemon') {
-      this.swirlExanimo.setDisplaySize(68, 76)
-    }
     this.swirlExanimo.setVisible(false)
     this.swirlExanimo.disableBody(true, true)
     this.physics.add.collider(this.swirlExanimo, this.staticPlatforms)
@@ -758,8 +761,8 @@ export class LaserAlleyScene extends Phaser.Scene {
       ;(this.swirlExanimo.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
 
       this.cutsceneLines = [
-        'Exemon: Okay, we are ready.',
-        'Exemon: Keep moving. Laser Alley is syncing again.',
+        "Swirl Exanimo: Okay, we're ready.",
+        'Swirl Exanimo: I traced the route to Lava Bog.',
         'Press Space to continue.',
       ]
       this.cutsceneLineIndex = 0
@@ -769,7 +772,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       gameProgress.swirlExanimoRescued = true
       saveGameProgress()
       this.exitDoor.setAlpha(1)
-      this.statusMessage = 'Exemon rescued. Reach the exit.'
+      this.statusMessage = 'Swirl Exanimo rescued. Reach the exit.'
       this.updateUiText()
     })
   }
@@ -846,8 +849,20 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    enemy.disableBody(true, true)
-    this.statusMessage = 'Enemy down!'
+    const now = this.time.now
+    const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
+    if (now - lastHitAt < 220) {
+      return
+    }
+    enemy.setData('lastHitAt', now)
+    const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
+    enemy.setData('hp', hp)
+    if (hp <= 0) {
+      enemy.disableBody(true, true)
+      this.statusMessage = 'Enemy down!'
+    } else {
+      this.statusMessage = `Enemy HP: ${hp}`
+    }
     this.updateUiText()
   }
 
@@ -912,15 +927,19 @@ export class LaserAlleyScene extends Phaser.Scene {
 
   private updateAllHealthBars(): void {
     this.drawHealthBar('player', this.player.x, this.player.y - 48, 52, this.playerHealth, this.playerMaxHealth, 0x8dff8d)
+    const patrolHp = Number(this.patrolEnemy.getData('hp') ?? 0)
+    const patrolMax = Number(this.patrolEnemy.getData('maxHp') ?? 1)
     if (this.patrolEnemy.active) {
-      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, 1, 1, 0xffa46b)
+      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, patrolHp, patrolMax, 0xffa46b)
     } else {
-      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, 0, 1, 0xffa46b)
+      this.drawHealthBar('patrol', this.patrolEnemy.x, this.patrolEnemy.y - 34, 40, 0, patrolMax, 0xffa46b)
     }
+    const laserBotHp = Number(this.laserBot.getData('hp') ?? 0)
+    const laserBotMax = Number(this.laserBot.getData('maxHp') ?? 1)
     if (this.laserBot.active) {
-      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, 1, 1, 0xffa46b)
+      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, laserBotHp, laserBotMax, 0xffa46b)
     } else {
-      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, 0, 1, 0xffa46b)
+      this.drawHealthBar('laser-bot', this.laserBot.x, this.laserBot.y - 34, 40, 0, laserBotMax, 0xffa46b)
     }
     if (this.miniBoss.active && !this.miniBossDefeated) {
       this.drawHealthBar(
@@ -1004,8 +1023,24 @@ export class LaserAlleyScene extends Phaser.Scene {
       case 'MOLTEN_TRAIL': {
         const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
         this.physics.add.existing(trail, true)
-        this.physics.add.overlap(trail, this.patrolEnemy, () => this.patrolEnemy.disableBody(true, true))
-        this.physics.add.overlap(trail, this.laserBot, () => this.laserBot.disableBody(true, true))
+        const hitEnemy = (enemy: Phaser.Physics.Arcade.Sprite): void => {
+          if (!enemy.active) {
+            return
+          }
+          const now = this.time.now
+          const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
+          if (now - lastHitAt < 260) {
+            return
+          }
+          enemy.setData('lastHitAt', now)
+          const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
+          enemy.setData('hp', hp)
+          if (hp <= 0) {
+            enemy.disableBody(true, true)
+          }
+        }
+        this.physics.add.overlap(trail, this.patrolEnemy, () => hitEnemy(this.patrolEnemy))
+        this.physics.add.overlap(trail, this.laserBot, () => hitEnemy(this.laserBot))
         this.time.delayedCall(2200, () => trail.destroy())
         this.statusMessage = 'Molten Trail ignited.'
         this.playTone(320, 0.09)
@@ -1044,7 +1079,7 @@ export class LaserAlleyScene extends Phaser.Scene {
       'Inspector Glowman: Laser Alley ahead. Stay sharp.',
       'Electroman: Patterns are cycling. Move on the off-beats.',
       'Micralis: Vertical climb route is the cleanest path.',
-      'Mission: Rescue Exemon and secure the map to Lava Bog.',
+      'Mission: Secure the map route to Lava Bog.',
       'Press Space to start.',
     ]
     this.cutsceneLineIndex = 0
@@ -1092,7 +1127,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.cutsceneText.setVisible(false)
 
     if (!this.rescueDone) {
-      this.statusMessage = 'Find Exemon in the upper prism chamber.'
+      this.statusMessage = 'Find Swirl Exanimo in the upper prism chamber.'
     }
     this.updateUiText()
   }
@@ -1109,7 +1144,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `HP: ${hp}`,
         `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${Math.ceil(this.miniBossHealth)} HP`}`,
-        `Exemon: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
+        `Swirl Exanimo: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Map to Lava Bog: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         this.statusMessage,
       ].join('\n'),

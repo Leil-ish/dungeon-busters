@@ -14,6 +14,7 @@ export class StageSelectScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#0f1624')
+    const viewportW = this.scale.width
     const viewportH = this.scale.height
 
     this.add.text(80, 80, 'Dungeon Busters', {
@@ -35,38 +36,37 @@ export class StageSelectScene extends Phaser.Scene {
       lineSpacing: 6,
     })
 
-    this.rightColumnText = this.add.text(520, 206, '', {
+    this.rightColumnText = this.add.text(Math.max(500, Math.floor(viewportW * 0.52)), 206, '', {
       color: '#dbe6ff',
       fontFamily: 'sans-serif',
       fontSize: '18px',
       lineSpacing: 6,
+      wordWrap: { width: Math.max(220, viewportW - Math.max(500, Math.floor(viewportW * 0.52)) - 80) },
     })
 
-    this.controlsText = this.add.text(80, 0, '', {
+    this.controlsText = this.add.text(80, viewportH - 48, '', {
       color: '#b2c5e9',
       fontFamily: 'sans-serif',
       fontSize: '16px',
       lineSpacing: 2,
     })
-    this.controlsText.setOrigin(0, 0)
-    this.controlsText.setText('Keys: 1-6 = Stages, L = Game Log')
+    this.controlsText.setOrigin(0, 1)
+    this.controlsText.setText('Keys: 1-6 = Stages | L = Game Log')
 
-    this.statusText = this.add.text(80, 0, '', {
+    this.statusText = this.add.text(80, viewportH - 74, '', {
       color: '#ffdca8',
       fontFamily: 'sans-serif',
       fontSize: '15px',
+      wordWrap: { width: Math.max(280, viewportW - 160) },
     })
+    this.statusText.setOrigin(0, 1)
 
-    const helperText = this.add.text(80, viewportH - 18, 'Micralis is always available. Other heroes unlock by rescue progress.', {
+    const helperText = this.add.text(80, viewportH - 16, 'Micralis is always available. Other heroes unlock by rescue progress.', {
       color: '#ffdca8',
       fontFamily: 'sans-serif',
       fontSize: '13px',
     })
     helperText.setOrigin(0, 1)
-
-    const controlsY = Math.min(viewportH - 82, this.leftColumnText.y + this.leftColumnText.height + 22)
-    this.controlsText.setY(controlsY)
-    this.statusText.setY(Math.min(viewportH - 44, controlsY + this.controlsText.height + 6))
 
     this.input.keyboard?.on('keydown-ONE', () => this.queueHeroSelect('SLIPPERY_HILLS', 'stage1'))
     this.input.keyboard?.on('keydown-TWO', () =>
@@ -120,7 +120,7 @@ export class StageSelectScene extends Phaser.Scene {
         `Torrent Key Piece: ${gameProgress.torrentKeyPiece ? 'Yes' : 'No'}`,
         `Volcano Man: ${gameProgress.volcanoManRescued ? 'Rescued' : 'Missing'} | Cavern Map: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
         `Icemeckel: ${gameProgress.icemeckelRescued ? 'Rescued' : 'Missing'} | Bloody Map: ${gameProgress.bloodyMapPiece ? 'Yes' : 'No'}`,
-        `Exemon: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
+        `Swirl Exanimo: ${gameProgress.swirlExanimoRescued ? 'Rescued' : 'Missing'} | Lava Map: ${gameProgress.lavaBogMap ? 'Yes' : 'No'}`,
         `Bouldereye: ${gameProgress.bouldereyeRescued ? 'Rescued' : 'Trapped'} | Clear: ${gameProgress.lavaBogCleared ? 'Yes' : 'No'}`,
         `Forge Unlock: ${this.isForgeUnlocked() ? 'Yes' : 'No'} | Stage 6 Clear: ${gameProgress.forgeOfOriginsCleared ? 'Yes' : 'No'}`,
       ].join('\n'),
@@ -134,7 +134,6 @@ export class StageSelectScene extends Phaser.Scene {
       (gameProgress.lavaBogCleared &&
         gameProgress.volcanoManRescued &&
         gameProgress.icemeckelRescued &&
-        gameProgress.swirlExanimoRescued &&
         gameProgress.illislimRescued &&
         gameProgress.hurricanoManRescued &&
         gameProgress.bouldereyeRescued)

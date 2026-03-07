@@ -190,6 +190,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.patrolEnemy.setCollideWorldBounds(true)
     this.patrolEnemy.setImmovable(true)
     ;(this.patrolEnemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.patrolEnemy.setData('lastHitAt', 0)
     this.patrolEnemy.setVelocityX(-this.patrolSpeed)
     this.physics.add.collider(this.patrolEnemy, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.patrolEnemy, () => this.applyDamage(1, 'Enemy hit!'))
@@ -198,6 +199,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.lavaBot.setImmovable(true)
     this.lavaBot.setCollideWorldBounds(true)
     ;(this.lavaBot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.lavaBot.setData('lastHitAt', 0)
     this.physics.add.collider(this.lavaBot, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.lavaBot, () => this.applyDamage(1, 'Lava Bot contact!'))
 
@@ -1390,6 +1392,12 @@ export class LavaBogScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
+    const now = this.time.now
+    const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
+    if (now - lastHitAt < 220) {
+      return
+    }
+    enemy.setData('lastHitAt', now)
     if (enemy === this.patrolEnemy) {
       this.patrolEnemyHealth = Math.max(0, this.patrolEnemyHealth - 1)
       if (this.patrolEnemyHealth <= 0) {
@@ -1583,8 +1591,32 @@ export class LavaBogScene extends Phaser.Scene {
       case 'MOLTEN_TRAIL': {
         const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
         this.physics.add.existing(trail, true)
-        this.physics.add.overlap(trail, this.patrolEnemy, () => this.patrolEnemy.disableBody(true, true))
-        this.physics.add.overlap(trail, this.lavaBot, () => this.lavaBot.disableBody(true, true))
+        const tickEnemy = (enemy: Phaser.Physics.Arcade.Sprite): void => {
+          if (!enemy.active) {
+            return
+          }
+          const now = this.time.now
+          const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
+          if (now - lastHitAt < 260) {
+            return
+          }
+          enemy.setData('lastHitAt', now)
+          if (enemy === this.patrolEnemy) {
+            this.patrolEnemyHealth = Math.max(0, this.patrolEnemyHealth - 1)
+            if (this.patrolEnemyHealth <= 0) {
+              enemy.disableBody(true, true)
+            }
+            return
+          }
+          if (enemy === this.lavaBot) {
+            this.lavaBotHealth = Math.max(0, this.lavaBotHealth - 1)
+            if (this.lavaBotHealth <= 0) {
+              enemy.disableBody(true, true)
+            }
+          }
+        }
+        this.physics.add.overlap(trail, this.patrolEnemy, () => tickEnemy(this.patrolEnemy))
+        this.physics.add.overlap(trail, this.lavaBot, () => tickEnemy(this.lavaBot))
         this.time.delayedCall(2200, () => trail.destroy())
         this.statusMessage = 'Molten Trail ignited.'
         this.playTone(320, 0.09)

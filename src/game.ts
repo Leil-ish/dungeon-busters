@@ -182,6 +182,8 @@ class Stage1 extends Phaser.Scene {
     this.enemy.setCollideWorldBounds(true)
     this.enemy.setImmovable(true)
     ;(this.enemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.enemy.setData('hp', 3)
+    this.enemy.setData('lastHitAt', 0)
     this.enemy.setVelocityX(-this.enemyPatrolSpeed)
 
     this.physics.add.collider(this.enemy, this.staticPlatforms)
@@ -191,6 +193,8 @@ class Stage1 extends Phaser.Scene {
     this.enemy2.setCollideWorldBounds(true)
     this.enemy2.setImmovable(true)
     ;(this.enemy2.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+    this.enemy2.setData('hp', 3)
+    this.enemy2.setData('lastHitAt', 0)
     this.enemy2.setVelocityX(-this.enemy2PatrolSpeed)
     this.physics.add.collider(this.enemy2, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.enemy2, () => this.handleEnemyHit())
@@ -517,8 +521,20 @@ class Stage1 extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    enemy.disableBody(true, true)
-    this.statusMessage = 'Enemy down!'
+    const now = this.time.now
+    const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
+    if (now - lastHitAt < 220) {
+      return
+    }
+    enemy.setData('lastHitAt', now)
+    const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
+    enemy.setData('hp', hp)
+    if (hp <= 0) {
+      enemy.disableBody(true, true)
+      this.statusMessage = 'Enemy down!'
+    } else {
+      this.statusMessage = `Enemy HP: ${hp}`
+    }
     this.updateUiText()
   }
 
@@ -594,8 +610,26 @@ class Stage1 extends Phaser.Scene {
       case 'MOLTEN_TRAIL': {
         const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
         this.physics.add.existing(trail, true)
-        this.physics.add.overlap(trail, this.enemy, () => this.enemy.disableBody(true, true))
-        this.physics.add.overlap(trail, this.enemy2, () => this.enemy2.disableBody(true, true))
+        this.physics.add.overlap(trail, this.enemy, () => {
+          if (!this.enemy.active) return
+          const now = this.time.now
+          const lastHitAt = Number(this.enemy.getData('lastHitAt') ?? 0)
+          if (now - lastHitAt < 260) return
+          this.enemy.setData('lastHitAt', now)
+          const hp = Math.max(0, Number(this.enemy.getData('hp') ?? 1) - 1)
+          this.enemy.setData('hp', hp)
+          if (hp <= 0) this.enemy.disableBody(true, true)
+        })
+        this.physics.add.overlap(trail, this.enemy2, () => {
+          if (!this.enemy2.active) return
+          const now = this.time.now
+          const lastHitAt = Number(this.enemy2.getData('lastHitAt') ?? 0)
+          if (now - lastHitAt < 260) return
+          this.enemy2.setData('lastHitAt', now)
+          const hp = Math.max(0, Number(this.enemy2.getData('hp') ?? 1) - 1)
+          this.enemy2.setData('hp', hp)
+          if (hp <= 0) this.enemy2.disableBody(true, true)
+        })
         this.time.delayedCall(2200, () => trail.destroy())
         this.statusMessage = 'Molten Trail ignited.'
         this.playTone(320, 0.09)

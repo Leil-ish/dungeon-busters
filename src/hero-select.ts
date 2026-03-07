@@ -84,12 +84,12 @@ export class HeroSelectScene extends Phaser.Scene {
     this.iconSprite = this.add.image(590, 204, '__WHITE')
     this.iconSprite.setVisible(false)
 
-    this.detailText = this.add.text(500, compact ? 254 : 280, '', {
+    this.detailText = this.add.text(500, compact ? 244 : 262, '', {
       color: '#f2f6ff',
       fontFamily: 'sans-serif',
-      fontSize: compact ? '18px' : '20px',
-      lineSpacing: compact ? 4 : 8,
-      wordWrap: { width: compact ? 370 : 390 },
+      fontSize: compact ? '17px' : '18px',
+      lineSpacing: compact ? 3 : 4,
+      wordWrap: { width: compact ? 360 : 390 },
     })
 
     this.controlsText = this.add.text(
@@ -158,7 +158,7 @@ export class HeroSelectScene extends Phaser.Scene {
         '',
         'Stage stats:',
         `Speed ${BASE_STATS.maxVelocityX.toFixed(0)} -> ${effective.maxVelocityX.toFixed(0)} | Jump ${BASE_STATS.jumpVelocity.toFixed(0)} -> ${effective.jumpVelocity.toFixed(0)}`,
-        `Damage ${BASE_STATS.damage.toFixed(2)} -> ${effective.damage.toFixed(2)} | Defense ${BASE_STATS.defense.toFixed(2)} -> ${effective.defense.toFixed(2)}`,
+        `Damage ${BASE_STATS.damage.toFixed(2)} -> ${effective.damage.toFixed(2)}  Defense ${BASE_STATS.defense.toFixed(2)} -> ${effective.defense.toFixed(2)}`,
       ].join('\n'),
     )
   }
@@ -227,18 +227,20 @@ export class HeroSelectScene extends Phaser.Scene {
     if (gameProgress.icemeckelRescued) {
       unlocked.add('ICEMECKEL')
     }
-    if (gameProgress.bloodyMapPiece) {
-      unlocked.add('HURRICANO_MAN')
-    }
     if (gameProgress.swirlExanimoRescued) {
       unlocked.add('SWIRL_EXANIMO')
+    }
+    if (gameProgress.illislimRescued) {
+      unlocked.add('ILLISLIM')
+    }
+    if (gameProgress.hurricanoManRescued) {
+      unlocked.add('HURRICANO_MAN')
     }
     const forgeUnlocked =
       gameProgress.devUnlockForgeOrigins ||
       (gameProgress.lavaBogCleared &&
         gameProgress.volcanoManRescued &&
         gameProgress.icemeckelRescued &&
-        gameProgress.swirlExanimoRescued &&
         gameProgress.illislimRescued &&
         gameProgress.hurricanoManRescued &&
         gameProgress.bouldereyeRescued)

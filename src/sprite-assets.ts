@@ -11,7 +11,7 @@ const SPRITE_MANIFEST: Array<[string, string]> = [
   ['hero-swirl-exanimo', 'sprites/Swirl%20Exanimo.png'],
   ['hero-illislim', 'sprites/Illislim.png'],
   ['hero-hurricano-man', 'sprites/Hurricano%20Man.png'],
-  ['hero-chromaforge', 'sprites/Chromaforge.png'],
+  ['hero-chromaforge', 'sprites/Chromaforge%20Playable.png'],
   ['enemy-scout', 'sprites/Monster%201.png'],
   ['enemy-laser-warden', 'sprites/Laser%20Warden.png'],
   ['enemy-infix', 'sprites/Infix.png'],
