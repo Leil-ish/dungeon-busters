@@ -131,6 +131,9 @@ export class LavaBogScene extends Phaser.Scene {
   private readonly lavaBotMaxHealth = 4
   private readonly allyMaxHealth = 6
   private readonly bouldereyeMaxHealth = 8
+  private illislimHealth = this.allyMaxHealth
+  private hurricanoHealth = this.allyMaxHealth
+  private bouldereyeHealth = this.bouldereyeMaxHealth
   private healthBarGfx = new Map<string, Phaser.GameObjects.Graphics>()
   private minionHealthBars = new Map<Phaser.Physics.Arcade.Sprite, Phaser.GameObjects.Graphics>()
 
@@ -143,6 +146,7 @@ export class LavaBogScene extends Phaser.Scene {
 
   private statusMessage = 'Cross Lava Bog and rescue Bouldereye.'
   private readonly stageName = 'Stage 5: Lava Bog'
+  private readonly lavaDripSpawnXs = [1040, 1490, 1840, 2250, 2680]
 
   constructor() {
     super('lava-bog')
@@ -246,6 +250,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.createRescueObjects()
     this.createCheckpointsAndItems()
     this.createVolcanoVents()
+    this.createLavaDripIndicators()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.fireKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
@@ -272,6 +277,14 @@ export class LavaBogScene extends Phaser.Scene {
   }
 
   update(): void {
+    if (!this.cutsceneActive && this.cutscenePanel?.visible) {
+      if (Phaser.Input.Keyboard.JustDown(this.fireKey)) {
+        this.cutscenePanel.setVisible(false)
+        this.cutsceneText.setVisible(false)
+      }
+      return
+    }
+
     if (this.cutsceneActive) {
       this.player.setAccelerationX(0)
       this.player.setVelocityX(0)
@@ -333,17 +346,6 @@ export class LavaBogScene extends Phaser.Scene {
     this.updateAllySupportFire()
     this.updateChromaforgeSupportFire()
     this.updateAllHealthBars()
-
-    if (this.bossFightStarted && !this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
-      this.miniBossDefeated = true
-      this.statusMessage = 'Infix defeated. Vault release open.'
-      this.updateUiText()
-    }
-
-    if (this.chromaforgeFightStarted && !this.chromaforgeDefeated && this.chromaforge && !this.chromaforge.active) {
-      this.chromaforgeDefeated = true
-      this.finishGameEnding()
-    }
 
     const pBody = this.player.body as Phaser.Physics.Arcade.Body
     if (pBody.blocked.down && this.player.y > this.LEVEL_H - 36) {
@@ -522,6 +524,18 @@ export class LavaBogScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.botShots, () => this.applyDamage(1, 'Molten shot hit!'))
     this.physics.add.overlap(this.player, this.bossMinions, () => this.applyDamage(1, 'Infix minion hit!'))
     this.physics.add.collider(this.bossMinions, this.staticPlatforms)
+    this.physics.add.overlap(this.illislimAlly, this.botShots, () => this.damageAlly('illislim', 1, 'Illislim was hit!'))
+    this.physics.add.overlap(this.hurricanoAlly, this.botShots, () => this.damageAlly('hurricano', 1, 'Hurricano Man was hit!'))
+    this.physics.add.overlap(this.bouldereye, this.botShots, () => this.damageAlly('bouldereye', 1, 'Bouldereye took fire!'))
+    this.physics.add.overlap(this.illislimAlly, this.bossMinions, () => this.damageAlly('illislim', 1, 'Illislim hit by minion!'))
+    this.physics.add.overlap(this.hurricanoAlly, this.bossMinions, () => this.damageAlly('hurricano', 1, 'Hurricano Man hit by minion!'))
+    this.physics.add.overlap(this.bouldereye, this.bossMinions, () => this.damageAlly('bouldereye', 1, 'Bouldereye hit by minion!'))
+    this.physics.add.overlap(this.illislimAlly, this.miniBoss, () => this.damageAlly('illislim', 1, 'Illislim collided with Infix!'))
+    this.physics.add.overlap(this.hurricanoAlly, this.miniBoss, () => this.damageAlly('hurricano', 1, 'Hurricano Man collided with Infix!'))
+    this.physics.add.overlap(this.bouldereye, this.miniBoss, () => this.damageAlly('bouldereye', 1, 'Bouldereye collided with Infix!'))
+    this.physics.add.overlap(this.illislimAlly, this.chromaforge, () => this.damageAlly('illislim', 1, 'Illislim hit by Chromaforge!'))
+    this.physics.add.overlap(this.hurricanoAlly, this.chromaforge, () => this.damageAlly('hurricano', 1, 'Hurricano Man hit by Chromaforge!'))
+    this.physics.add.overlap(this.bouldereye, this.chromaforge, () => this.damageAlly('bouldereye', 1, 'Bouldereye hit by Chromaforge!'))
   }
 
   private createRescueObjects(): void {
@@ -577,6 +591,7 @@ export class LavaBogScene extends Phaser.Scene {
       this.illislimAlly.setVisible(true)
       this.illislimAlly.setImmovable(true)
       ;(this.illislimAlly.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.illislimHealth = this.allyMaxHealth
       this.statusMessage = 'Illislim joined your team!'
       this.playTone(620, 0.1)
       this.updateUiText()
@@ -603,6 +618,7 @@ export class LavaBogScene extends Phaser.Scene {
       this.hurricanoAlly.setVisible(true)
       this.hurricanoAlly.setImmovable(true)
       ;(this.hurricanoAlly.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.hurricanoHealth = this.allyMaxHealth
       this.statusMessage = 'Hurricano Man joined your team!'
       this.playTone(700, 0.1)
       this.updateUiText()
@@ -1077,8 +1093,15 @@ export class LavaBogScene extends Phaser.Scene {
     }
   }
 
+  private createLavaDripIndicators(): void {
+    for (const x of this.lavaDripSpawnXs) {
+      this.add.ellipse(x, 70, 74, 32, 0x5e1d14, 0.88).setDepth(10)
+      this.add.rectangle(x, 310, 14, 520, 0xff8b4d, 0.06).setDepth(2)
+      this.add.ellipse(x, this.LEVEL_H - 40, 52, 12, 0xff9d66, 0.22).setDepth(3)
+    }
+  }
+
   private scheduleLavaDrips(): void {
-    const dripSpawnXs = [1040, 1490, 1840, 2250, 2680]
     this.time.addEvent({
       delay: 1250,
       loop: true,
@@ -1086,7 +1109,15 @@ export class LavaBogScene extends Phaser.Scene {
         if (!this.scene.isActive() || this.cutsceneActive) {
           return
         }
-        const spawnX = Phaser.Utils.Array.GetRandom(dripSpawnXs)
+        const spawnX = Phaser.Utils.Array.GetRandom(this.lavaDripSpawnXs)
+        const warn = this.add.rectangle(spawnX, 92, 6, 14, 0xffc58c, 0.9)
+        warn.setDepth(16)
+        this.tweens.add({
+          targets: warn,
+          alpha: 0,
+          duration: 220,
+          onComplete: () => warn.destroy(),
+        })
         const drip = this.add.rectangle(spawnX, 84, 10, 18, 0xff7b43, 0.9)
         drip.setDepth(14)
         this.fallingDrips.push({
@@ -1181,6 +1212,7 @@ export class LavaBogScene extends Phaser.Scene {
       this.bouldereye.setVisible(true)
       this.bouldereye.setImmovable(true)
       ;(this.bouldereye.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      this.bouldereyeHealth = this.bouldereyeMaxHealth
     })
 
     this.time.delayedCall(1400, () => {
@@ -1245,6 +1277,68 @@ export class LavaBogScene extends Phaser.Scene {
         ally.y = Phaser.Math.Linear(ally.y, this.player.y + offsetY, 0.08)
       }
     }
+  }
+
+  private damageAlly(kind: 'illislim' | 'hurricano' | 'bouldereye', amount: number, message: string): void {
+    if (this.cutsceneActive) {
+      return
+    }
+    const now = this.time.now
+    const key = `${kind}LastHitAt`
+    const sceneData = this.data
+    const lastHitAt = Number(sceneData.get(key) ?? 0)
+    if (now - lastHitAt < 420) {
+      return
+    }
+    sceneData.set(key, now)
+
+    if (kind === 'illislim') {
+      if (!this.illislimAlly.active || !this.illislimRescued) {
+        return
+      }
+      this.illislimHealth = Math.max(0, this.illislimHealth - amount)
+      this.illislimAlly.setTint(0xffd4d4)
+      this.time.delayedCall(110, () => this.illislimAlly.clearTint())
+      if (this.illislimHealth <= 0) {
+        this.illislimAlly.disableBody(true, true)
+        this.statusMessage = 'Illislim is down!'
+      } else {
+        this.statusMessage = message
+      }
+      this.updateUiText()
+      return
+    }
+
+    if (kind === 'hurricano') {
+      if (!this.hurricanoAlly.active || !this.hurricanoRescued) {
+        return
+      }
+      this.hurricanoHealth = Math.max(0, this.hurricanoHealth - amount)
+      this.hurricanoAlly.setTint(0xffd4d4)
+      this.time.delayedCall(110, () => this.hurricanoAlly.clearTint())
+      if (this.hurricanoHealth <= 0) {
+        this.hurricanoAlly.disableBody(true, true)
+        this.statusMessage = 'Hurricano Man is down!'
+      } else {
+        this.statusMessage = message
+      }
+      this.updateUiText()
+      return
+    }
+
+    if (!this.bouldereye.active || !this.rescueDone) {
+      return
+    }
+    this.bouldereyeHealth = Math.max(0, this.bouldereyeHealth - amount)
+    this.bouldereye.setTint(0xffd4d4)
+    this.time.delayedCall(110, () => this.bouldereye.clearTint())
+    if (this.bouldereyeHealth <= 0) {
+      this.bouldereye.disableBody(true, true)
+      this.statusMessage = 'Bouldereye is down!'
+    } else {
+      this.statusMessage = message
+    }
+    this.updateUiText()
   }
 
   private updateAllySupportFire(): void {
@@ -1533,7 +1627,7 @@ export class LavaBogScene extends Phaser.Scene {
     this.lastAbilityAt = now
     const enemies = [this.patrolEnemy, this.lavaBot]
 
-    const pushEnemies = (): void => {
+    const pushEnemies = (push = 190): void => {
       for (const enemy of enemies) {
         if (!enemy.active) {
           continue
@@ -1541,19 +1635,38 @@ export class LavaBogScene extends Phaser.Scene {
         const dx = enemy.x - this.player.x
         const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
         if (inFront && Math.abs(dx) < 190) {
-          enemy.setVelocityX(this.facingDir * 190)
+          enemy.setVelocityX(this.facingDir * push)
         }
       }
     }
 
     switch (this.selectedHero.specialAbility) {
-      case 'GUST_DASH':
       case 'PHOTON_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
+        pushEnemies(160)
+        this.statusMessage = 'Photon Dash: precision burst!'
+        this.playTone(700, 0.07)
+        break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-        pushEnemies()
-        this.statusMessage = `${this.selectedHero.moves.special.name}!`
-        this.playTone(680, 0.07)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
+        pushEnemies(210)
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 170) {
+            enemy.setTint(0xbde9ff)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(550, () => enemy.clearTint())
+          }
+        }
+        this.statusMessage = 'Thunder Slide: enemy stun!'
+        this.playTone(760, 0.08)
+        break
+      case 'GUST_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
+        pushEnemies(260)
+        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
         this.damageReductionMul = 0.45
@@ -1643,6 +1756,20 @@ export class LavaBogScene extends Phaser.Scene {
         this.statusMessage = 'Absorb active. Defense boosted.'
         this.playTone(380, 0.1)
         break
+      case 'SOLAR_BIND':
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
+            enemy.setTint(0xfff2a8)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(1200, () => {
+              if (enemy.active) enemy.clearTint()
+            })
+          }
+        }
+        this.statusMessage = 'Solar Bind: enemies locked.'
+        this.playTone(590, 0.1)
+        break
       default:
         this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
     }
@@ -1730,6 +1857,7 @@ export class LavaBogScene extends Phaser.Scene {
         'Dungeon Busters',
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
+        `Special (X): ${this.selectedHero.moves.special.name}`,
         `HP: ${hp}`,
         `Infix: ${this.miniBossDefeated ? 'Defeated' : `${this.miniBossHealth.toFixed(1)} HP`}`,
         `Chromaforge: ${this.chromaforgeFightStarted ? (this.chromaforgeDefeated ? 'Defeated' : `${this.chromaforgeHealth.toFixed(1)} HP`) : 'Dormant'}`,
@@ -1813,19 +1941,19 @@ export class LavaBogScene extends Phaser.Scene {
     }
 
     if (this.illislimRescued && this.illislimAlly.active) {
-      this.drawHealthBar('illislim', this.illislimAlly.x, this.illislimAlly.y - 36, 38, this.allyMaxHealth, this.allyMaxHealth, 0x9effbd)
+      this.drawHealthBar('illislim', this.illislimAlly.x, this.illislimAlly.y - 36, 38, this.illislimHealth, this.allyMaxHealth, 0x9effbd)
     } else {
       this.drawHealthBar('illislim', 0, 0, 38, 0, this.allyMaxHealth, 0x9effbd)
     }
 
     if (this.hurricanoRescued && this.hurricanoAlly.active) {
-      this.drawHealthBar('hurricano', this.hurricanoAlly.x, this.hurricanoAlly.y - 36, 38, this.allyMaxHealth, this.allyMaxHealth, 0x9edfff)
+      this.drawHealthBar('hurricano', this.hurricanoAlly.x, this.hurricanoAlly.y - 36, 38, this.hurricanoHealth, this.allyMaxHealth, 0x9edfff)
     } else {
       this.drawHealthBar('hurricano', 0, 0, 38, 0, this.allyMaxHealth, 0x9edfff)
     }
 
     if (this.rescueDone && this.bouldereye.active) {
-      this.drawHealthBar('bouldereye', this.bouldereye.x, this.bouldereye.y - 36, 42, this.bouldereyeMaxHealth, this.bouldereyeMaxHealth, 0xffd18e)
+      this.drawHealthBar('bouldereye', this.bouldereye.x, this.bouldereye.y - 36, 42, this.bouldereyeHealth, this.bouldereyeMaxHealth, 0xffd18e)
     } else {
       this.drawHealthBar('bouldereye', 0, 0, 42, 0, this.bouldereyeMaxHealth, 0xffd18e)
     }

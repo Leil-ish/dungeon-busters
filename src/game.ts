@@ -280,6 +280,14 @@ class Stage1 extends Phaser.Scene {
   update(): void {
     this.waterfallBackdrop.tilePositionY += 0.45
 
+    if (!this.cutsceneActive && this.cutscenePanel?.visible) {
+      if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+        this.cutscenePanel.setVisible(false)
+        this.cutsceneText.setVisible(false)
+      }
+      return
+    }
+
     if (this.cutsceneActive) {
       this.player.setAccelerationX(0)
       this.player.setVelocityX(0)
@@ -453,7 +461,7 @@ class Stage1 extends Phaser.Scene {
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
-      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nHP: ${hp}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
+      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nSpecial (X): ${this.selectedHero.moves.special.name}\nHP: ${hp}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
     )
   }
 
@@ -549,8 +557,8 @@ class Stage1 extends Phaser.Scene {
     }
 
     this.lastAbilityAt = now
-    const pushEnemies = (): void => {
-      const enemies = [this.enemy, this.enemy2]
+    const enemies = [this.enemy, this.enemy2]
+    const pushEnemies = (push = 190): void => {
       for (const enemy of enemies) {
         if (!enemy.active) {
           continue
@@ -559,19 +567,38 @@ class Stage1 extends Phaser.Scene {
         const dx = enemy.x - this.player.x
         const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
         if (inFront && Math.abs(dx) < 190) {
-          enemy.setVelocityX(this.facingDir * 190)
+          enemy.setVelocityX(this.facingDir * push)
         }
       }
     }
 
     switch (this.selectedHero.specialAbility) {
-      case 'GUST_DASH':
       case 'PHOTON_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
+        pushEnemies(160)
+        this.statusMessage = 'Photon Dash: precision burst!'
+        this.playTone(700, 0.07)
+        break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-        pushEnemies()
-        this.statusMessage = `${this.selectedHero.moves.special.name}!`
-        this.playTone(680, 0.07)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
+        pushEnemies(210)
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 170) {
+            enemy.setTint(0xbde9ff)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(550, () => enemy.clearTint())
+          }
+        }
+        this.statusMessage = 'Thunder Slide: enemy stun!'
+        this.playTone(760, 0.08)
+        break
+      case 'GUST_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
+        pushEnemies(260)
+        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
         this.damageReductionMul = 0.45
@@ -655,6 +682,20 @@ class Stage1 extends Phaser.Scene {
         })
         this.statusMessage = 'Absorb active. Defense boosted.'
         this.playTone(380, 0.1)
+        break
+      case 'SOLAR_BIND':
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
+            enemy.setTint(0xfff2a8)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(1200, () => {
+              if (enemy.active) enemy.clearTint()
+            })
+          }
+        }
+        this.statusMessage = 'Solar Bind: enemies locked.'
+        this.playTone(590, 0.1)
         break
       default:
         this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`

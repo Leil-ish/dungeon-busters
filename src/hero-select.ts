@@ -153,7 +153,9 @@ export class HeroSelectScene extends Phaser.Scene {
     this.detailText.setText(
       [
         `${selectedHero.displayName}`,
-        `Special: ${selectedHero.moves.special.name} (Ready)`,
+        `Special (X): ${selectedHero.moves.special.name}`,
+        `${selectedHero.moves.special.description}`,
+        `Status: ${selectedHero.moves.special.implementation === 'todo' ? 'Coming soon' : 'Ready'}`,
         `Affinity: SPD ${affinity.speedMul.toFixed(2)}x  DMG ${affinity.damageMul.toFixed(2)}x  DEF ${affinity.defenseMul.toFixed(2)}x`,
         '',
         'Stage stats:',

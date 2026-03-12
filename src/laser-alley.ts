@@ -83,6 +83,8 @@ export class LaserAlleyScene extends Phaser.Scene {
   private miniBossDefeated = false
   private readonly miniBossMaxHealth = 14
   private miniBossHealth = 14
+  private miniBossHitCount = 0
+  private readonly miniBossRequiredHits = 12
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
@@ -132,6 +134,10 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.createTextures()
     this.createBackdrop()
     this.buildLevelGeometry()
+    this.miniBossDefeated = false
+    this.miniBossHealth = this.miniBossMaxHealth
+    this.miniBossHitCount = 0
+    this.lastMiniBossHitAt = 0
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
@@ -217,6 +223,15 @@ export class LaserAlleyScene extends Phaser.Scene {
   }
 
   update(): void {
+    if (!this.cutsceneActive && this.cutscenePanel?.visible) {
+      if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+        this.cutscenePanel.setVisible(false)
+        this.cutsceneText.setVisible(false)
+      }
+      this.updateAllHealthBars()
+      return
+    }
+
     if (this.cutsceneActive) {
       this.player.setAccelerationX(0)
       this.player.setVelocityX(0)
@@ -455,12 +470,12 @@ export class LaserAlleyScene extends Phaser.Scene {
   }
 
   private createLaserHazards(): void {
-    this.addTimedLaser(1010, 795, 14, 120, 1300, 1200)
-    this.addTimedLaser(1410, 795, 14, 120, 1400, 1200)
-    this.addTimedLaser(2210, 520, 14, 140, 900, 800)
-    this.addTimedLaser(2490, 470, 14, 140, 900, 800)
+    // Reduced density + longer off windows for platform traversal readability.
+    this.addTimedLaser(1080, 790, 12, 110, 1000, 1700)
+    this.addTimedLaser(2240, 560, 12, 120, 850, 1500)
+    this.addTimedLaser(2520, 505, 12, 120, 850, 1500)
 
-    this.sweepLaser = this.add.rectangle(1700, 760, 220, 16, 0xff4c80, 0.75)
+    this.sweepLaser = this.add.rectangle(1720, 760, 170, 12, 0xff4c80, 0.65)
     this.sweepLaser.setDepth(12)
     this.updateSweepLaserBounds()
   }
@@ -682,10 +697,10 @@ export class LaserAlleyScene extends Phaser.Scene {
     if (!this.sweepLaser) {
       return
     }
-    this.sweepLaser.y += this.sweepDir * 1.1
-    if (this.sweepLaser.y < 650) {
+    this.sweepLaser.y += this.sweepDir * 0.78
+    if (this.sweepLaser.y < 690) {
       this.sweepDir = 1
-    } else if (this.sweepLaser.y > 810) {
+    } else if (this.sweepLaser.y > 805) {
       this.sweepDir = -1
     }
     this.updateSweepLaserBounds()
@@ -708,13 +723,13 @@ export class LaserAlleyScene extends Phaser.Scene {
     const p = this.player.getBounds()
     for (const laser of this.timedLasers) {
       if (laser.active && Phaser.Geom.Intersects.RectangleToRectangle(p, laser.bounds)) {
-        this.applyDamage(3, 'Timed laser hit!')
+        this.applyDamage(2, 'Timed laser hit!')
         return
       }
     }
 
     if (Phaser.Geom.Intersects.RectangleToRectangle(p, this.sweepLaserBounds)) {
-      this.applyDamage(3, 'Sweeper laser hit!')
+      this.applyDamage(2, 'Sweeper laser hit!')
     }
   }
 
@@ -873,17 +888,19 @@ export class LaserAlleyScene extends Phaser.Scene {
 
     shot.disableBody(true, true)
     const now = this.time.now
-    if (now - this.lastMiniBossHitAt < 120) {
+    if (now - this.lastMiniBossHitAt < 180) {
       return
     }
     this.lastMiniBossHitAt = now
-    const damage = Math.min(1, Math.max(0.1, this.effectiveStats.damage))
-    this.miniBossHealth = Math.max(0, this.miniBossHealth - damage)
+    this.miniBossHitCount += 1
+    const ratio = Phaser.Math.Clamp(1 - this.miniBossHitCount / this.miniBossRequiredHits, 0, 1)
+    this.miniBossHealth = this.miniBossMaxHealth * ratio
     enemy.setTint(0xff8aa6)
     this.time.delayedCall(100, () => enemy.clearTint())
 
-    if (this.miniBossHealth <= 0) {
+    if (this.miniBossHitCount >= this.miniBossRequiredHits || this.miniBossHealth <= 0) {
       this.miniBossDefeated = true
+      this.miniBossHealth = 0
       enemy.disableBody(true, true)
       if (this.miniBossLabel) {
         this.miniBossLabel.setVisible(false)
@@ -965,7 +982,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.lastAbilityAt = now
     const enemies = [this.patrolEnemy, this.laserBot]
 
-    const pushEnemies = (): void => {
+    const pushEnemies = (push = 190): void => {
       for (const enemy of enemies) {
         if (!enemy.active) {
           continue
@@ -973,19 +990,38 @@ export class LaserAlleyScene extends Phaser.Scene {
         const dx = enemy.x - this.player.x
         const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
         if (inFront && Math.abs(dx) < 190) {
-          enemy.setVelocityX(this.facingDir * 190)
+          enemy.setVelocityX(this.facingDir * push)
         }
       }
     }
 
     switch (this.selectedHero.specialAbility) {
-      case 'GUST_DASH':
       case 'PHOTON_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
+        pushEnemies(160)
+        this.statusMessage = 'Photon Dash: precision burst!'
+        this.playTone(700, 0.07)
+        break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-        pushEnemies()
-        this.statusMessage = `${this.selectedHero.moves.special.name}!`
-        this.playTone(680, 0.07)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
+        pushEnemies(210)
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 170) {
+            enemy.setTint(0xbde9ff)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(550, () => enemy.clearTint())
+          }
+        }
+        this.statusMessage = 'Thunder Slide: enemy stun!'
+        this.playTone(760, 0.08)
+        break
+      case 'GUST_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
+        pushEnemies(260)
+        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
         this.damageReductionMul = 0.45
@@ -1067,6 +1103,20 @@ export class LaserAlleyScene extends Phaser.Scene {
         this.statusMessage = 'Absorb active. Defense boosted.'
         this.playTone(380, 0.1)
         break
+      case 'SOLAR_BIND':
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
+            enemy.setTint(0xfff2a8)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(1200, () => {
+              if (enemy.active) enemy.clearTint()
+            })
+          }
+        }
+        this.statusMessage = 'Solar Bind: enemies locked.'
+        this.playTone(590, 0.1)
+        break
       default:
         this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
     }
@@ -1142,6 +1192,7 @@ export class LaserAlleyScene extends Phaser.Scene {
         'Dungeon Busters',
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
+        `Special (X): ${this.selectedHero.moves.special.name}`,
         `HP: ${hp}`,
         `Laser Warden: ${this.miniBossDefeated ? 'Defeated' : `${Math.ceil(this.miniBossHealth)} HP`}`,
         `Swirl Exanimo: ${this.rescueDone ? 'Rescued' : 'Missing'}`,

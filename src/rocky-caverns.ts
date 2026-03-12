@@ -168,6 +168,16 @@ export class RockyCavernsScene extends Phaser.Scene {
   update(): void {
     this.cavernBackdrop.tilePositionY += 0.2
 
+    // Safety: if panel visibility ever desyncs from cutscene state,
+    // let Space dismiss the panel and block shooting until it is gone.
+    if (!this.cutsceneActive && this.cutscenePanel?.visible) {
+      if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+        this.cutscenePanel.setVisible(false)
+        this.cutsceneText.setVisible(false)
+      }
+      return
+    }
+
     if (this.cutsceneActive) {
       this.player.setAccelerationX(0)
       this.player.setVelocityX(0)
@@ -305,6 +315,12 @@ export class RockyCavernsScene extends Phaser.Scene {
       maxSize: this.maxRocks,
       allowGravity: true,
     })
+
+    // Permanent danger clues: stalactite markers + ground impact hints.
+    for (const spawn of this.rockSpawnPoints) {
+      this.add.triangle(spawn.x, spawn.y + 20, 0, 0, 22, 0, 11, 26, 0xc8b2a0, 0.85).setDepth(8)
+      this.add.ellipse(spawn.x, this.LEVEL_H - 40, 58, 12, 0xffc89a, 0.28).setDepth(3)
+    }
 
     this.physics.add.collider(this.rocks, this.staticPlatforms, (obj1, obj2) => {
       const maybeRock1 = obj1 as unknown as { texture?: { key?: string } }
@@ -665,27 +681,47 @@ export class RockyCavernsScene extends Phaser.Scene {
     }
 
     this.lastAbilityAt = now
-    const pushEnemies = (): void => {
-      for (const enemy of [this.enemy1, this.enemy2]) {
+    const enemies = [this.enemy1, this.enemy2]
+    const pushEnemies = (push = 190): void => {
+      for (const enemy of enemies) {
         if (!enemy.active) {
           continue
         }
         const dx = enemy.x - this.player.x
         const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
         if (inFront && Math.abs(dx) < 190) {
-          enemy.setVelocityX(this.facingDir * 190)
+          enemy.setVelocityX(this.facingDir * push)
         }
       }
     }
 
     switch (this.selectedHero.specialAbility) {
-      case 'GUST_DASH':
       case 'PHOTON_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
+        pushEnemies(160)
+        this.statusMessage = 'Photon Dash: precision burst!'
+        this.playTone(700, 0.07)
+        break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 260))
-        pushEnemies()
-        this.statusMessage = `${this.selectedHero.moves.special.name}!`
-        this.playTone(680, 0.07)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
+        pushEnemies(210)
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 170) {
+            enemy.setTint(0xbde9ff)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(550, () => enemy.clearTint())
+          }
+        }
+        this.statusMessage = 'Thunder Slide: enemy stun!'
+        this.playTone(760, 0.08)
+        break
+      case 'GUST_DASH':
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
+        pushEnemies(260)
+        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
         this.damageReductionMul = 0.45
@@ -766,6 +802,20 @@ export class RockyCavernsScene extends Phaser.Scene {
         })
         this.statusMessage = 'Absorb active. Defense boosted.'
         this.playTone(380, 0.1)
+        break
+      case 'SOLAR_BIND':
+        for (const enemy of enemies) {
+          if (!enemy.active) continue
+          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
+            enemy.setTint(0xfff2a8)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(1200, () => {
+              if (enemy.active) enemy.clearTint()
+            })
+          }
+        }
+        this.statusMessage = 'Solar Bind: enemies locked.'
+        this.playTone(590, 0.1)
         break
       default:
         this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
@@ -868,6 +918,7 @@ export class RockyCavernsScene extends Phaser.Scene {
         'Dungeon Busters',
         this.stageName,
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
+        `Special (X): ${this.selectedHero.moves.special.name}`,
         `HP: ${hp}`,
         `Volcano Man: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
