@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { BloodyHillsScene } from './bloody-hills'
+import { applyCombatDamage, applyStompDamage, configureCombatant } from './combat'
 import { IntroStoryScene } from './intro-story'
 import {
   DEFAULT_HERO_ID,
@@ -8,7 +9,7 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress, saveGameProgress } from './progress'
+import { gameProgress, getLivesDisplay, loseLife, resetLives, saveGameProgress } from './progress'
 import { RockyCavernsScene } from './rocky-caverns'
 import { preloadSpriteAssets } from './sprite-assets'
 import { StageSelectScene } from './stage-select'
@@ -17,6 +18,8 @@ import { LaserAlleyScene } from './laser-alley'
 import { LavaBogScene } from './lava-bog'
 import { GameLogScene } from './game-log'
 import { ForgeOfOriginsScene } from './forge-of-origins'
+import { DungeonMinigameScene, MeteorDodgeScene } from './minigames'
+import { addMinigameEntrances } from './minigame-entrances'
 
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
@@ -31,6 +34,7 @@ class Stage1 extends Phaser.Scene {
   private keyPiece: Phaser.GameObjects.Rectangle | null = null
   private exitDoor!: Phaser.GameObjects.Rectangle
   private uiText!: Phaser.GameObjects.Text
+  private livesText!: Phaser.GameObjects.Text
   private waterfallBackdrop!: Phaser.GameObjects.TileSprite
   private cutscenePanel!: Phaser.GameObjects.Rectangle
   private cutsceneText!: Phaser.GameObjects.Text
@@ -53,6 +57,7 @@ class Stage1 extends Phaser.Scene {
   private lastAbilityAt = 0
   private abilityCooldownScale = 1
   private shotCooldownScale = 1
+  private abilityPowerScale = 1
   private playerHasKey = false
   private stageClearTriggered = false
   private statusMessage = 'Find the Torrent Key Piece.'
@@ -85,9 +90,20 @@ class Stage1 extends Phaser.Scene {
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
+  private startX = this.playerSpawnX
+  private startY = this.playerSpawnY
+  private returningFromMinigame = false
+  private returnMessage = ''
 
   constructor() {
     super('stage1')
+  }
+
+  init(data: { fromMinigame?: boolean; returnX?: number; returnY?: number; returnMessage?: string }): void {
+    this.returningFromMinigame = data.fromMinigame ?? false
+    this.startX = data.returnX ?? this.playerSpawnX
+    this.startY = data.returnY ?? this.playerSpawnY
+    this.returnMessage = data.returnMessage ?? ''
   }
 
   preload(): void {
@@ -167,7 +183,7 @@ class Stage1 extends Phaser.Scene {
 
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
-    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
+    this.player = this.physics.add.sprite(this.startX, this.startY, heroTexture)
     if (heroTexture === 'hero-exemon') {
       this.player.setDisplaySize(56, 64)
     }
@@ -175,6 +191,7 @@ class Stage1 extends Phaser.Scene {
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+    configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
 
     this.physics.add.collider(this.player, this.staticPlatforms)
 
@@ -182,22 +199,20 @@ class Stage1 extends Phaser.Scene {
     this.enemy.setCollideWorldBounds(true)
     this.enemy.setImmovable(true)
     ;(this.enemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.enemy.setData('hp', 3)
-    this.enemy.setData('lastHitAt', 0)
+    configureCombatant(this.enemy, { maxHp: 10, widthRatio: 0.72, heightRatio: 0.8 })
     this.enemy.setVelocityX(-this.enemyPatrolSpeed)
 
     this.physics.add.collider(this.enemy, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.enemy, () => this.handleEnemyHit())
+    this.physics.add.overlap(this.player, this.enemy, () => this.handleEnemyHit(this.enemy))
 
     this.enemy2 = this.physics.add.sprite(this.enemy2PatrolMaxX, 316, enemyTexture)
     this.enemy2.setCollideWorldBounds(true)
     this.enemy2.setImmovable(true)
     ;(this.enemy2.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.enemy2.setData('hp', 3)
-    this.enemy2.setData('lastHitAt', 0)
+    configureCombatant(this.enemy2, { maxHp: 10, widthRatio: 0.72, heightRatio: 0.8 })
     this.enemy2.setVelocityX(-this.enemy2PatrolSpeed)
     this.physics.add.collider(this.enemy2, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.enemy2, () => this.handleEnemyHit())
+    this.physics.add.overlap(this.player, this.enemy2, () => this.handleEnemyHit(this.enemy2))
 
     this.shots = this.physics.add.group({
       allowGravity: false,
@@ -241,6 +256,7 @@ class Stage1 extends Phaser.Scene {
     this.exitDoor = this.add.rectangle(worldWidth - 120, worldHeight - 150, 54, 140, 0x7e5cff)
     this.physics.add.existing(this.exitDoor, true)
     this.createCheckpointsAndItems()
+    this.createMinigameEntrances()
 
     this.physics.add.overlap(this.player, this.keyPiece, () => {
       if (!this.keyPiece || this.playerHasKey) {
@@ -264,17 +280,38 @@ class Stage1 extends Phaser.Scene {
 
     this.uiText = this.add.text(16, 16, '', {
       color: '#f3f6ff',
-      fontSize: '18px',
+      fontSize: '16px',
       fontFamily: 'sans-serif',
       backgroundColor: '#0a1020cc',
       padding: { x: 10, y: 8 },
+      wordWrap: { width: 560 },
+      fixedWidth: 580,
     })
     this.uiText.setScrollFactor(0)
     this.uiText.setDepth(10)
+    this.livesText = this.add.text(this.scale.width - 16, 16, '', {
+      color: '#ffdca8',
+      fontSize: '21px',
+      fontFamily: 'sans-serif',
+      backgroundColor: '#0a1020cc',
+      padding: { x: 10, y: 6 },
+      fixedWidth: 176,
+      align: 'right',
+    })
+    this.livesText.setOrigin(1, 0)
+    this.livesText.setScrollFactor(0)
+    this.livesText.setDepth(10)
+    if (this.returnMessage) {
+      this.statusMessage = this.returnMessage
+    }
     this.updateUiText()
 
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
-    this.initializeCutscene()
+    if (this.returningFromMinigame) {
+      this.cutsceneActive = false
+    } else {
+      this.initializeCutscene()
+    }
   }
 
   update(): void {
@@ -413,11 +450,24 @@ class Stage1 extends Phaser.Scene {
       }
       this.shotCooldownScale = 0.85
       this.abilityCooldownScale = 0.85
+      this.abilityPowerScale = 1.35
       this.powerPickup.destroy()
       this.powerPickup = null
-      this.statusMessage = 'Power core found. Ability cooldown boosted.'
+      this.statusMessage = 'Power core found. Abilities empowered and cooldowns boosted.'
       this.playTone(640, 0.1)
       this.updateUiText()
+    })
+  }
+
+  private createMinigameEntrances(): void {
+    addMinigameEntrances(this, {
+      stageKey: 'stage1',
+      player: this.player,
+      returnScene: 'stage1',
+      setStatus: (message) => {
+        this.statusMessage = message
+        this.updateUiText()
+      },
     })
   }
 
@@ -461,12 +511,34 @@ class Stage1 extends Phaser.Scene {
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
-      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nSpecial (X): ${this.selectedHero.moves.special.name}\nHP: ${hp}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
+      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nSpecial (X): ${this.selectedHero.moves.special.name}\nHP: ${hp}\nPlatform Parts: ${gameProgress.platformParts}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
     )
+    if (this.livesText) {
+      this.livesText.setText(`Lives ${getLivesDisplay()}`)
+    }
   }
 
-  private handleEnemyHit(): void {
+  private handleEnemyHit(enemy: Phaser.Physics.Arcade.Sprite): void {
+    if (this.tryStompEnemy(enemy)) {
+      return
+    }
     this.applyDamage(1, 'Oof! Try again.')
+  }
+
+  private tryStompEnemy(enemy: Phaser.Physics.Arcade.Sprite): boolean {
+    if (this.cutsceneActive || !enemy.active) {
+      return false
+    }
+
+    const result = applyStompDamage(this, this.player, enemy)
+    if (!result) {
+      return false
+    }
+
+    this.statusMessage = result.died ? 'Stomp hit! Enemy down.' : `Stomp hit! Enemy HP: ${result.hp}`
+    this.playTone(520, 0.07)
+    this.updateUiText()
+    return true
   }
 
   private applyDamage(amount: number, message: string, forceRespawn = false): void {
@@ -480,14 +552,58 @@ class Stage1 extends Phaser.Scene {
     this.statusMessage = message
     this.updateUiText()
     this.playTone(220, 0.09)
+    if (forceRespawn) {
+      this.playerHealth = 0
+    }
 
-    if (forceRespawn || this.playerHealth <= 0) {
-      this.playerHealth = this.playerMaxHealth
-      this.player.setPosition(this.checkpointX, this.checkpointY)
-      this.player.setVelocity(0, 0)
-      this.player.setAccelerationX(0)
-      this.statusMessage = 'Respawned at checkpoint.'
-      this.updateUiText()
+    if (this.playerHealth <= 0) {
+      const remainingLives = loseLife()
+      if (remainingLives <= 0) {
+        resetLives()
+        this.playerHealth = this.playerMaxHealth
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = 'GAME OVER! Out of lives.'
+        this.updateUiText()
+        this.physics.pause()
+        const blackout = this.add.rectangle(
+          this.scale.width / 2,
+          this.scale.height / 2,
+          this.scale.width,
+          this.scale.height,
+          0x050103,
+          0.92,
+        )
+        blackout.setDepth(200)
+        blackout.setScrollFactor(0)
+        const text = this.add.text(this.scale.width / 2, this.scale.height / 2 - 18, 'GAME OVER', {
+          color: '#fff1f1',
+          fontFamily: 'sans-serif',
+          fontSize: '72px',
+          align: 'center',
+          fontStyle: 'bold',
+        })
+        text.setOrigin(0.5)
+        text.setDepth(201)
+        text.setScrollFactor(0)
+        const subtext = this.add.text(this.scale.width / 2, this.scale.height / 2 + 46, 'Out of lives', {
+          color: '#ffb3b3',
+          fontFamily: 'sans-serif',
+          fontSize: '28px',
+          align: 'center',
+        })
+        subtext.setOrigin(0.5)
+        subtext.setDepth(201)
+        subtext.setScrollFactor(0)
+        this.time.delayedCall(2200, () => this.scene.start('stage-select'))
+      } else {
+        this.playerHealth = this.playerMaxHealth
+        this.player.setPosition(this.checkpointX, this.checkpointY)
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = `Lost a life! ${remainingLives} left.`
+        this.updateUiText()
+      }
     }
 
     const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
@@ -529,19 +645,15 @@ class Stage1 extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    const now = this.time.now
-    const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
-    if (now - lastHitAt < 220) {
+    const result = applyCombatDamage(this, enemy, 1, 220)
+    if (!result.applied) {
       return
     }
-    enemy.setData('lastHitAt', now)
-    const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
-    enemy.setData('hp', hp)
-    if (hp <= 0) {
+    if (result.died) {
       enemy.disableBody(true, true)
       this.statusMessage = 'Enemy down!'
     } else {
-      this.statusMessage = `Enemy HP: ${hp}`
+      this.statusMessage = `Enemy HP: ${result.hp}`
     }
     this.updateUiText()
   }
@@ -558,6 +670,42 @@ class Stage1 extends Phaser.Scene {
 
     this.lastAbilityAt = now
     const enemies = [this.enemy, this.enemy2]
+    const power = this.abilityPowerScale
+    const impactRadiusX = 170 + power * 40
+    const impactRadiusY = 120 + power * 24
+    const damageEnemy = (enemy: Phaser.Physics.Arcade.Sprite, amount: number, cooldownMs = 220): boolean => {
+      if (!enemy.active) {
+        return false
+      }
+      const result = applyCombatDamage(this, enemy, amount, cooldownMs)
+      if (!result.applied) {
+        return false
+      }
+      if (result.died) {
+        enemy.disableBody(true, true)
+      }
+      return true
+    }
+    const affectFrontEnemies = (
+      rangeX: number,
+      rangeY: number,
+      handler: (enemy: Phaser.Physics.Arcade.Sprite) => void,
+    ): number => {
+      let hits = 0
+      for (const enemy of enemies) {
+        if (!enemy.active) {
+          continue
+        }
+        const dx = enemy.x - this.player.x
+        const dy = Math.abs(enemy.y - this.player.y)
+        const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+        if (inFront && Math.abs(dx) <= rangeX && dy <= rangeY) {
+          hits += 1
+          handler(enemy)
+        }
+      }
+      return hits
+    }
     const pushEnemies = (push = 190): void => {
       for (const enemy of enemies) {
         if (!enemy.active) {
@@ -574,54 +722,98 @@ class Stage1 extends Phaser.Scene {
 
     switch (this.selectedHero.specialAbility) {
       case 'PHOTON_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
-        pushEnemies(160)
-        this.statusMessage = 'Photon Dash: precision burst!'
+        this.player.setTint(0x9ed8ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 240 + 40 * power))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -80))
+        affectFrontEnemies(impactRadiusX, impactRadiusY, (enemy) => {
+          damageEnemy(enemy, 1.4 * power, 170)
+          enemy.setVelocityX(this.facingDir * (220 + 40 * power))
+        })
+        this.time.delayedCall(180, () => this.player.clearTint())
+        this.statusMessage = 'Photon Dash: cut straight through the line!'
         this.playTone(700, 0.07)
         break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
-        pushEnemies(210)
-        for (const enemy of enemies) {
-          if (!enemy.active) continue
-          if (Math.abs(enemy.x - this.player.x) < 170) {
-            enemy.setTint(0xbde9ff)
-            enemy.setVelocityX(0)
-            this.time.delayedCall(550, () => enemy.clearTint())
+        this.damageReductionMul = Math.min(this.damageReductionMul, 0.18)
+        this.player.setTint(0xbde9ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 340 + 40 * power))
+        pushEnemies(260 + 35 * power)
+        const pulse = this.add.circle(this.player.x + this.facingDir * 30, this.player.y + 6, 24, 0xbde9ff, 0.38)
+        pulse.setDepth(28)
+        this.tweens.add({
+          targets: pulse,
+          scale: 4,
+          alpha: 0,
+          duration: 260,
+          onComplete: () => pulse.destroy(),
+        })
+        affectFrontEnemies(240 + 30 * power, 145, (enemy) => {
+          damageEnemy(enemy, 1.85 * power, 150)
+          enemy.setTint(0xbde9ff)
+          enemy.setVelocity(this.facingDir * (90 + 20 * power), -120)
+          this.time.delayedCall(950, () => {
+            if (!enemy.active) {
+              return
+            }
+            enemy.clearTint()
+            enemy.setVelocityX(this.facingDir * 40)
+          })
+        })
+        this.time.delayedCall(320, () => this.player.clearTint())
+        this.time.delayedCall(520, () => {
+          if (this.damageReductionMul <= 0.18) {
+            this.damageReductionMul = 1
           }
-        }
-        this.statusMessage = 'Thunder Slide: enemy stun!'
+        })
+        this.statusMessage = 'Thunder Slide: lightning lane opened!'
         this.playTone(760, 0.08)
         break
       case 'GUST_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
-        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
-        pushEnemies(260)
-        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.player.setTint(0xbaf6ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320 + 40 * power))
+        this.player.setVelocityY(-180 - 35 * power)
+        affectFrontEnemies(impactRadiusX + 20, impactRadiusY + 30, (enemy) => {
+          damageEnemy(enemy, 1.1 * power, 180)
+          enemy.setVelocity(this.facingDir * (260 + 30 * power), -160 - 20 * power)
+        })
+        this.time.delayedCall(220, () => this.player.clearTint())
+        this.statusMessage = 'Gust Dash: wind shear launch!'
         this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
-        this.damageReductionMul = 0.45
+        this.damageReductionMul = 0.26
         this.player.setTint(0xc6f6ff)
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + Math.ceil(power))
+        affectFrontEnemies(150 + 20 * power, 120, (enemy) => {
+          damageEnemy(enemy, 0.9 * power, 160)
+          enemy.setTint(0xfff2a8)
+          this.time.delayedCall(300, () => enemy.active && enemy.clearTint())
+        })
         this.time.delayedCall(2200, () => {
           this.damageReductionMul = 1
           this.player.clearTint()
         })
-        this.statusMessage = 'Radiant Barrier active.'
+        this.statusMessage = 'Radiant Barrier active. Light holds the line.'
         this.playTone(520, 0.1)
         break
       case 'FREEZE_PATCH': {
-        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 180, 24, 0xb8f5ff, 0.55)
+        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 220 + power * 30, 26, 0xb8f5ff, 0.55)
         this.physics.add.existing(patch, true)
-        const patchRect = new Phaser.Geom.Rectangle(this.player.x - 90, this.player.y + 36, 180, 24)
+        const patchRect = new Phaser.Geom.Rectangle(
+          this.player.x - patch.width / 2,
+          this.player.y + 35,
+          patch.width,
+          26,
+        )
         const timer = this.time.addEvent({
-          delay: 70,
-          repeat: 28,
+          delay: 90,
+          repeat: 24,
           callback: () => {
             for (const enemy of [this.enemy, this.enemy2]) {
               const body = enemy.body as Phaser.Physics.Arcade.Body | null
               if (enemy.active && body && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
-                enemy.setVelocityX(body.velocity.x * 0.82)
+                enemy.setVelocityX(body.velocity.x * 0.65)
+                damageEnemy(enemy, 0.35 * power, 180)
               }
             }
           },
@@ -630,71 +822,80 @@ class Stage1 extends Phaser.Scene {
           timer.remove(false)
           patch.destroy()
         })
-        this.statusMessage = 'Freeze Patch deployed.'
+        this.statusMessage = 'Freeze Patch deployed. Ice keeps grinding them down.'
         this.playTone(410, 0.1)
         break
       }
       case 'MOLTEN_TRAIL': {
-        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
+        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 150 + power * 30, 22, 0xff6b3d, 0.78)
         this.physics.add.existing(trail, true)
+        affectFrontEnemies(140 + 20 * power, 90, (enemy) => {
+          damageEnemy(enemy, 1.3 * power, 150)
+        })
         this.physics.add.overlap(trail, this.enemy, () => {
           if (!this.enemy.active) return
-          const now = this.time.now
-          const lastHitAt = Number(this.enemy.getData('lastHitAt') ?? 0)
-          if (now - lastHitAt < 260) return
-          this.enemy.setData('lastHitAt', now)
-          const hp = Math.max(0, Number(this.enemy.getData('hp') ?? 1) - 1)
-          this.enemy.setData('hp', hp)
-          if (hp <= 0) this.enemy.disableBody(true, true)
+          damageEnemy(this.enemy, 0.7 * power, 180)
         })
         this.physics.add.overlap(trail, this.enemy2, () => {
           if (!this.enemy2.active) return
-          const now = this.time.now
-          const lastHitAt = Number(this.enemy2.getData('lastHitAt') ?? 0)
-          if (now - lastHitAt < 260) return
-          this.enemy2.setData('lastHitAt', now)
-          const hp = Math.max(0, Number(this.enemy2.getData('hp') ?? 1) - 1)
-          this.enemy2.setData('hp', hp)
-          if (hp <= 0) this.enemy2.disableBody(true, true)
+          damageEnemy(this.enemy2, 0.7 * power, 180)
         })
         this.time.delayedCall(2200, () => trail.destroy())
-        this.statusMessage = 'Molten Trail ignited.'
+        this.statusMessage = 'Molten Trail ignited. The ground stays hot.'
         this.playTone(320, 0.09)
         break
       }
       case 'FUSION_WAVE':
         if (!this.speedBoostActive) {
           this.speedBoostActive = true
-          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 80, 900)
+          this.player.setTint(0xd8f7ff)
+          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 110 + 20 * power, 900)
+          this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+          affectFrontEnemies(190 + 20 * power, 120, (enemy) => {
+            damageEnemy(enemy, 1.1 * power, 180)
+            enemy.setVelocityX(this.facingDir * (240 + 20 * power))
+          })
           this.time.delayedCall(2600, () => {
             this.speedBoostActive = false
             this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+            this.player.clearTint()
           })
         }
-        this.statusMessage = 'Fusion Wave boost active.'
+        this.statusMessage = 'Fusion Wave boost active. Elements aligned.'
         this.playTone(740, 0.1)
         break
       case 'ABSORB':
-        this.damageReductionMul = 0.6
-        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
-        this.time.delayedCall(2600, () => {
+        this.damageReductionMul = 0.42
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1 + Math.floor(power))
+        affectFrontEnemies(150 + 10 * power, 120, (enemy) => {
+          if (damageEnemy(enemy, 1.05 * power, 180)) {
+            this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 0.4)
+          }
+        })
+        this.time.delayedCall(3000, () => {
           this.damageReductionMul = 1
         })
-        this.statusMessage = 'Absorb active. Defense boosted.'
+        this.statusMessage = 'Absorb active. Drain and endure.'
         this.playTone(380, 0.1)
         break
       case 'SOLAR_BIND':
-        for (const enemy of enemies) {
-          if (!enemy.active) continue
-          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
-            enemy.setTint(0xfff2a8)
-            enemy.setVelocityX(0)
-            this.time.delayedCall(1200, () => {
-              if (enemy.active) enemy.clearTint()
-            })
-          }
-        }
-        this.statusMessage = 'Solar Bind: enemies locked.'
+        this.player.setTint(0xf6d3ff)
+        this.player.setVelocityY(-520)
+        this.player.setVelocityX(this.facingDir * 120)
+        this.time.delayedCall(260, () => this.player.setVelocityY(900))
+        this.time.delayedCall(480, () => {
+          let hits = 0
+          affectFrontEnemies(190 + 20 * power, 170, (enemy) => {
+            if (damageEnemy(enemy, 2.4 * power, 120)) {
+              hits += 1
+              enemy.setVelocityY(-220)
+            }
+          })
+          this.player.clearTint()
+          this.statusMessage = hits > 0 ? `Chromaforge Crash hit ${hits}!` : 'Chromaforge Crash landed.'
+          this.updateUiText()
+        })
+        this.statusMessage = 'Chromaforge Crash armed!'
         this.playTone(590, 0.1)
         break
       default:
@@ -776,6 +977,8 @@ const config: Phaser.Types.Core.GameConfig = {
     IntroStoryScene,
     StageSelectScene,
     GameLogScene,
+    DungeonMinigameScene,
+    MeteorDodgeScene,
     HeroSelectScene,
     Stage1,
     RockyCavernsScene,

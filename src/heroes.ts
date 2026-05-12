@@ -181,8 +181,8 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
       },
       special: {
         name: 'Thunder Slide',
-        description: 'Electrified dash damaging enemies in path.',
-        implementation: 'todo',
+        description: 'Lightning slide that stuns enemies and shorts out incoming fire.',
+        implementation: 'implemented',
       },
       super: {
         name: 'Storm Burst',
@@ -456,9 +456,10 @@ export const HEROES: Record<HeroId, HeroDefinition> = {
         implementation: 'partial',
       },
       special: {
-        name: 'Solar Bind',
-        description: 'Energy pulse that stuns enemies briefly.',
-        implementation: 'implemented',
+        name: 'Chromaforge Crash',
+        description: 'Rises into the air, then blasts down to crush monsters flat.',
+        implementation: 'partial',
+        notes: 'UI updated with final move identity; gameplay behavior still needs the dedicated crash implementation.',
       },
       super: {
         name: 'Forge Burst',

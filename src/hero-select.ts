@@ -8,7 +8,7 @@ import {
   type RuntimePlayerStats,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress, saveGameProgress } from './progress'
+import { gameProgress, resetLives, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 
 const BASE_STATS: RuntimePlayerStats = {
@@ -176,6 +176,7 @@ export class HeroSelectScene extends Phaser.Scene {
     gameProgress.selectedHeroId = heroId
     gameProgress.pendingStageId = null
     gameProgress.pendingStageSceneKey = null
+    resetLives()
     saveGameProgress()
     this.scene.start(stageSceneKey)
   }

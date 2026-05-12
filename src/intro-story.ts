@@ -46,14 +46,18 @@ export class IntroStoryScene extends Phaser.Scene {
       loreText.setLineSpacing(2)
     }
 
-    const prompt = this.add.text(70, viewportH - 14, 'Press Enter to continue to Stage Select', {
+    const prompt = this.add.text(70, viewportH - 14, 'Press Enter, Space, or click to continue to Stage Select', {
       color: '#b8c7e6',
       fontFamily: 'sans-serif',
       fontSize: viewportH < 620 ? '16px' : '18px',
     })
     prompt.setOrigin(0, 1)
 
-    this.input.keyboard?.once('keydown-ENTER', () => this.scene.start('stage-select'))
-    this.input.keyboard?.once('keydown-SPACE', () => this.scene.start('stage-select'))
+    const continueToStageSelect = (): void => {
+      this.scene.start('stage-select')
+    }
+    this.input.keyboard?.once('keydown-ENTER', continueToStageSelect)
+    this.input.keyboard?.once('keydown-SPACE', continueToStageSelect)
+    this.input.once('pointerdown', continueToStageSelect)
   }
 }

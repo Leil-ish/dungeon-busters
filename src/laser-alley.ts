@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { applyCombatDamage, applyStompDamage, configureCombatant } from './combat'
 import {
   DEFAULT_HERO_ID,
   HEROES,
@@ -6,8 +7,9 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress, saveGameProgress } from './progress'
+import { gameProgress, getLivesDisplay, loseLife, resetLives, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
+import { addMinigameEntrances } from './minigame-entrances'
 
 type TimedLaser = {
   rect: Phaser.GameObjects.Rectangle
@@ -46,6 +48,7 @@ export class LaserAlleyScene extends Phaser.Scene {
   private spaceKey!: Phaser.Input.Keyboard.Key
   private abilityKey!: Phaser.Input.Keyboard.Key
   private uiText!: Phaser.GameObjects.Text
+  private livesText!: Phaser.GameObjects.Text
 
   private cutscenePanel!: Phaser.GameObjects.Rectangle
   private cutsceneText!: Phaser.GameObjects.Text
@@ -81,16 +84,16 @@ export class LaserAlleyScene extends Phaser.Scene {
   private stageClearTriggered = false
   private rescueDone = false
   private miniBossDefeated = false
-  private readonly miniBossMaxHealth = 14
-  private miniBossHealth = 14
-  private miniBossHitCount = 0
-  private readonly miniBossRequiredHits = 12
+  private readonly miniBossMaxHealth = 32
+  private miniBossHealth = 32
+  private lastMiniBossHitAt = 0
   private isPlayerInvulnerable = false
   private facingDir = 1
   private lastShotAt = 0
   private lastAbilityAt = 0
   private shotCooldownScale = 1
   private abilityCooldownScale = 1
+  private abilityPowerScale = 1
   private damageReductionMul = 1
   private speedBoostActive = false
 
@@ -104,10 +107,19 @@ export class LaserAlleyScene extends Phaser.Scene {
   private statusMessage = 'Navigate Laser Alley and secure the map route.'
   private readonly stageName = 'Stage 4: Laser Alley'
   private healthBarGfx = new Map<string, Phaser.GameObjects.Graphics>()
-  private lastMiniBossHitAt = 0
-
+  private startX = this.playerSpawnX
+  private startY = this.playerSpawnY
+  private returningFromMinigame = false
+  private returnMessage = ''
   constructor() {
     super('laser-alley')
+  }
+
+  init(data: { fromMinigame?: boolean; returnX?: number; returnY?: number; returnMessage?: string }): void {
+    this.returningFromMinigame = data.fromMinigame ?? false
+    this.startX = data.returnX ?? this.playerSpawnX
+    this.startY = data.returnY ?? this.playerSpawnY
+    this.returnMessage = data.returnMessage ?? ''
   }
 
   preload(): void {
@@ -136,13 +148,10 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.buildLevelGeometry()
     this.miniBossDefeated = false
     this.miniBossHealth = this.miniBossMaxHealth
-    this.miniBossHitCount = 0
-    this.lastMiniBossHitAt = 0
-
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'player-block'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'enemy-block'
     const wardenTexture = this.textures.exists('enemy-laser-warden') ? 'enemy-laser-warden' : enemyTexture
-    this.player = this.physics.add.sprite(this.playerSpawnX, this.playerSpawnY, heroTexture)
+    this.player = this.physics.add.sprite(this.startX, this.startY, heroTexture)
     if (heroTexture === 'hero-exemon') {
       this.player.setDisplaySize(56, 64)
     }
@@ -150,6 +159,7 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+    configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
     this.physics.add.collider(this.player, this.staticPlatforms)
     for (const moving of this.movingPlatforms) {
       this.physics.add.collider(this.player, moving)
@@ -159,22 +169,22 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.patrolEnemy.setCollideWorldBounds(true)
     this.patrolEnemy.setImmovable(true)
     ;(this.patrolEnemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.patrolEnemy.setData('hp', 4)
-    this.patrolEnemy.setData('maxHp', 4)
-    this.patrolEnemy.setData('lastHitAt', 0)
+    configureCombatant(this.patrolEnemy, { maxHp: 10, widthRatio: 0.72, heightRatio: 0.8 })
     this.patrolEnemy.setVelocityX(-this.patrolSpeed)
     this.physics.add.collider(this.patrolEnemy, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.patrolEnemy, () => this.applyDamage(1, 'Enemy hit! Try again.'))
+    this.physics.add.overlap(this.player, this.patrolEnemy, () =>
+      this.handlePlayerEnemyContact(this.patrolEnemy, 'Enemy hit! Try again.'),
+    )
 
     this.laserBot = this.physics.add.sprite(2110, 438, enemyTexture)
     this.laserBot.setImmovable(true)
     this.laserBot.setCollideWorldBounds(true)
     ;(this.laserBot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.laserBot.setData('hp', 5)
-    this.laserBot.setData('maxHp', 5)
-    this.laserBot.setData('lastHitAt', 0)
+    configureCombatant(this.laserBot, { maxHp: 11, widthRatio: 0.72, heightRatio: 0.8 })
     this.physics.add.collider(this.laserBot, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.laserBot, () => this.applyDamage(1, 'Laser Bot contact!'))
+    this.physics.add.overlap(this.player, this.laserBot, () =>
+      this.handlePlayerEnemyContact(this.laserBot, 'Laser Bot contact!'),
+    )
 
     this.miniBoss = this.physics.add.sprite(2870, 430, wardenTexture)
     this.miniBoss.setDisplaySize(124, 124)
@@ -183,9 +193,13 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.miniBoss.setCollideWorldBounds(true)
     this.miniBossBaseY = 430
     ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.miniBoss.body as Phaser.Physics.Arcade.Body).setSize(84, 90, true)
+    configureCombatant(this.miniBoss, { maxHp: this.miniBossMaxHealth, widthRatio: 0.68, heightRatio: 0.82 })
+    this.miniBoss.setData('hp', this.miniBossHealth)
+    this.miniBoss.setData('maxHp', this.miniBossMaxHealth)
     this.physics.add.collider(this.miniBoss, this.staticPlatforms)
-    this.physics.add.overlap(this.player, this.miniBoss, () => this.applyDamage(1, 'Laser Warden hit!'))
+    this.physics.add.overlap(this.player, this.miniBoss, () =>
+      this.handlePlayerEnemyContact(this.miniBoss, 'Laser Warden hit!'),
+    )
     this.miniBossLabel = this.add.text(this.miniBoss.x - 62, this.miniBoss.y - 86, 'LASER WARDEN', {
       color: '#ffd7e4',
       fontFamily: 'sans-serif',
@@ -199,6 +213,15 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.createLaserHazards()
     this.createRescueObjects()
     this.createCheckpointsAndItems()
+    addMinigameEntrances(this, {
+      stageKey: 'laser-alley',
+      player: this.player,
+      returnScene: 'laser-alley',
+      setStatus: (message) => {
+        this.statusMessage = message
+        this.updateUiText()
+      },
+    })
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
@@ -209,15 +232,36 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.uiText = this.add.text(16, 16, '', {
       color: '#f3f6ff',
       fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '16px',
       backgroundColor: '#09071acc',
       padding: { x: 10, y: 8 },
+      wordWrap: { width: 560 },
+      fixedWidth: 580,
     })
     this.uiText.setDepth(50)
     this.uiText.setScrollFactor(0)
+    this.livesText = this.add.text(this.scale.width - 16, 16, '', {
+      color: '#ffdca8',
+      fontFamily: 'sans-serif',
+      fontSize: '21px',
+      backgroundColor: '#09071acc',
+      padding: { x: 10, y: 6 },
+      fixedWidth: 176,
+      align: 'right',
+    })
+    this.livesText.setOrigin(1, 0)
+    this.livesText.setDepth(50)
+    this.livesText.setScrollFactor(0)
+    if (this.returnMessage) {
+      this.statusMessage = this.returnMessage
+    }
     this.updateUiText()
 
-    this.initializeIntroCutscene()
+    if (this.returningFromMinigame) {
+      this.cutsceneActive = false
+    } else {
+      this.initializeIntroCutscene()
+    }
     this.scheduleBotShot()
     this.scheduleMiniBossShot()
   }
@@ -558,9 +602,10 @@ export class LaserAlleyScene extends Phaser.Scene {
       }
       this.shotCooldownScale = 0.82
       this.abilityCooldownScale = 0.82
+      this.abilityPowerScale = 1.4
       this.powerPickup.destroy()
       this.powerPickup = null
-      this.statusMessage = 'Power core found. Cooldowns reduced.'
+      this.statusMessage = 'Power core found. Abilities empowered and cooldowns boosted.'
       this.playTone(640, 0.1)
       this.updateUiText()
     })
@@ -815,18 +860,58 @@ export class LaserAlleyScene extends Phaser.Scene {
     this.statusMessage = message
     this.updateUiText()
     this.playTone(220, 0.09)
+    if (forceRespawn) {
+      this.playerHealth = 0
+    }
 
     if (this.playerHealth <= 0) {
-      this.playerHealth = this.playerMaxHealth
-      this.player.setPosition(this.checkpointX, this.checkpointY)
-      this.player.setVelocity(0, 0)
-      this.player.setAccelerationX(0)
-      this.statusMessage = 'Respawned at checkpoint.'
-      this.updateUiText()
-    } else if (forceRespawn) {
-      this.player.setPosition(this.checkpointX, this.checkpointY)
-      this.player.setVelocity(0, 0)
-      this.player.setAccelerationX(0)
+      const remainingLives = loseLife()
+      if (remainingLives <= 0) {
+        resetLives()
+        this.playerHealth = this.playerMaxHealth
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = 'GAME OVER! Out of lives.'
+        this.updateUiText()
+        this.physics.pause()
+        const blackout = this.add.rectangle(
+          this.scale.width / 2,
+          this.scale.height / 2,
+          this.scale.width,
+          this.scale.height,
+          0x050103,
+          0.92,
+        )
+        blackout.setDepth(200)
+        blackout.setScrollFactor(0)
+        const text = this.add.text(this.scale.width / 2, this.scale.height / 2 - 18, 'GAME OVER', {
+          color: '#fff1f1',
+          fontFamily: 'sans-serif',
+          fontSize: '72px',
+          align: 'center',
+          fontStyle: 'bold',
+        })
+        text.setOrigin(0.5)
+        text.setDepth(201)
+        text.setScrollFactor(0)
+        const subtext = this.add.text(this.scale.width / 2, this.scale.height / 2 + 46, 'Out of lives', {
+          color: '#ffb3b3',
+          fontFamily: 'sans-serif',
+          fontSize: '28px',
+          align: 'center',
+        })
+        subtext.setOrigin(0.5)
+        subtext.setDepth(201)
+        subtext.setScrollFactor(0)
+        this.time.delayedCall(2200, () => this.scene.start('stage-select'))
+      } else {
+        this.playerHealth = this.playerMaxHealth
+        this.player.setPosition(this.checkpointX, this.checkpointY)
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = `Lost a life! ${remainingLives} left.`
+        this.updateUiText()
+      }
     }
 
     const defenseScale = Phaser.Math.Clamp(this.effectiveStats.defense, 0.85, 1.2)
@@ -834,6 +919,53 @@ export class LaserAlleyScene extends Phaser.Scene {
       this.isPlayerInvulnerable = false
       this.player.clearTint()
     })
+  }
+
+  private handlePlayerEnemyContact(enemy: Phaser.Physics.Arcade.Sprite, damageMessage: string): void {
+    if (this.tryStompEnemy(enemy)) {
+      return
+    }
+    this.applyDamage(1, damageMessage)
+  }
+
+  private tryStompEnemy(enemy: Phaser.Physics.Arcade.Sprite): boolean {
+    if (this.cutsceneActive || !enemy.active) {
+      return false
+    }
+
+    const result = applyStompDamage(this, this.player, enemy, {
+      bounceVelocity: enemy === this.miniBoss ? -360 : -320,
+    })
+    if (!result) {
+      return false
+    }
+
+    if (enemy === this.miniBoss) {
+      this.miniBossHealth = result.hp
+      enemy.setData('hp', this.miniBossHealth)
+      enemy.setData('maxHp', this.miniBossMaxHealth)
+      enemy.setTint(0xff8aa6)
+      this.time.delayedCall(100, () => {
+        if (enemy.active) {
+          enemy.clearTint()
+        }
+      })
+      if (result.died || this.miniBossHealth <= 0) {
+        this.miniBossDefeated = true
+        this.miniBossHealth = 0
+        enemy.disableBody(true, true)
+        this.miniBossLabel?.setVisible(false)
+        this.statusMessage = 'Stomp hit! Laser Warden defeated.'
+      } else {
+        this.statusMessage = `Stomp hit! Laser Warden HP: ${Math.ceil(this.miniBossHealth)}`
+      }
+    } else {
+      this.statusMessage = result.died ? 'Stomp hit! Enemy down.' : `Stomp hit! Enemy HP: ${result.hp}`
+    }
+
+    this.playTone(520, 0.07)
+    this.updateUiText()
+    return true
   }
 
   private fireShot(): void {
@@ -864,19 +996,15 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     shot.disableBody(true, true)
-    const now = this.time.now
-    const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
-    if (now - lastHitAt < 220) {
+    const result = applyCombatDamage(this, enemy, 1, 220)
+    if (!result.applied) {
       return
     }
-    enemy.setData('lastHitAt', now)
-    const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
-    enemy.setData('hp', hp)
-    if (hp <= 0) {
+    if (result.died) {
       enemy.disableBody(true, true)
       this.statusMessage = 'Enemy down!'
     } else {
-      this.statusMessage = `Enemy HP: ${hp}`
+      this.statusMessage = `Enemy HP: ${result.hp}`
     }
     this.updateUiText()
   }
@@ -892,13 +1020,13 @@ export class LaserAlleyScene extends Phaser.Scene {
       return
     }
     this.lastMiniBossHitAt = now
-    this.miniBossHitCount += 1
-    const ratio = Phaser.Math.Clamp(1 - this.miniBossHitCount / this.miniBossRequiredHits, 0, 1)
-    this.miniBossHealth = this.miniBossMaxHealth * ratio
+    this.miniBossHealth = Math.max(0, this.miniBossHealth - 1)
+    enemy.setData('hp', this.miniBossHealth)
+    enemy.setData('maxHp', this.miniBossMaxHealth)
     enemy.setTint(0xff8aa6)
     this.time.delayedCall(100, () => enemy.clearTint())
 
-    if (this.miniBossHitCount >= this.miniBossRequiredHits || this.miniBossHealth <= 0) {
+    if (this.miniBossHealth <= 0) {
       this.miniBossDefeated = true
       this.miniBossHealth = 0
       enemy.disableBody(true, true)
@@ -980,7 +1108,64 @@ export class LaserAlleyScene extends Phaser.Scene {
     }
 
     this.lastAbilityAt = now
-    const enemies = [this.patrolEnemy, this.laserBot]
+    const enemies = [this.patrolEnemy, this.laserBot, this.miniBoss]
+    const power = this.abilityPowerScale
+    const impactRadiusX = 170 + power * 40
+    const impactRadiusY = 120 + power * 24
+    const damageEnemy = (enemy: Phaser.Physics.Arcade.Sprite, amount: number, cooldownMs = 220): boolean => {
+      if (!enemy.active) {
+        return false
+      }
+      if (enemy === this.miniBoss) {
+        if (this.miniBossDefeated) {
+          return false
+        }
+        const hitNow = this.time.now
+        if (hitNow - this.lastMiniBossHitAt < Math.max(140, cooldownMs)) {
+          return false
+        }
+        this.lastMiniBossHitAt = hitNow
+        this.miniBossHealth = Math.max(0, this.miniBossHealth - amount)
+        enemy.setData('hp', this.miniBossHealth)
+        enemy.setData('maxHp', this.miniBossMaxHealth)
+        enemy.setTint(0xff8aa6)
+        this.time.delayedCall(100, () => enemy.active && enemy.clearTint())
+        if (this.miniBossHealth <= 0) {
+          this.miniBossDefeated = true
+          this.miniBossHealth = 0
+          enemy.disableBody(true, true)
+        }
+        return true
+      }
+      const result = applyCombatDamage(this, enemy, amount, cooldownMs)
+      if (!result.applied) {
+        return false
+      }
+      if (result.died) {
+        enemy.disableBody(true, true)
+      }
+      return true
+    }
+    const affectFrontEnemies = (
+      rangeX: number,
+      rangeY: number,
+      handler: (enemy: Phaser.Physics.Arcade.Sprite) => void,
+    ): number => {
+      let hits = 0
+      for (const enemy of enemies) {
+        if (!enemy.active) {
+          continue
+        }
+        const dx = enemy.x - this.player.x
+        const dy = Math.abs(enemy.y - this.player.y)
+        const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+        if (inFront && Math.abs(dx) <= rangeX && dy <= rangeY) {
+          hits += 1
+          handler(enemy)
+        }
+      }
+      return hits
+    }
 
     const pushEnemies = (push = 190): void => {
       for (const enemy of enemies) {
@@ -997,124 +1182,193 @@ export class LaserAlleyScene extends Phaser.Scene {
 
     switch (this.selectedHero.specialAbility) {
       case 'PHOTON_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
-        pushEnemies(160)
-        this.statusMessage = 'Photon Dash: precision burst!'
+        this.player.setTint(0x9ed8ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 240 + 40 * power))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -80))
+        affectFrontEnemies(impactRadiusX, impactRadiusY, (enemy) => {
+          damageEnemy(enemy, enemy === this.miniBoss ? 1.8 * power : 1.4 * power, 170)
+          enemy.setVelocityX(this.facingDir * (220 + 40 * power))
+        })
+        this.time.delayedCall(180, () => this.player.clearTint())
+        this.statusMessage = 'Photon Dash: cut straight through the line!'
         this.playTone(700, 0.07)
         break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
-        pushEnemies(210)
-        for (const enemy of enemies) {
-          if (!enemy.active) continue
-          if (Math.abs(enemy.x - this.player.x) < 170) {
-            enemy.setTint(0xbde9ff)
-            enemy.setVelocityX(0)
-            this.time.delayedCall(550, () => enemy.clearTint())
+        this.damageReductionMul = Math.min(this.damageReductionMul, 0.16)
+        this.player.setTint(0xbde9ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 350 + 45 * power))
+        pushEnemies(280 + 35 * power)
+        const pulse = this.add.circle(this.player.x + this.facingDir * 36, this.player.y + 4, 28, 0xbde9ff, 0.42)
+        pulse.setDepth(28)
+        this.tweens.add({
+          targets: pulse,
+          scale: 4.4,
+          alpha: 0,
+          duration: 260,
+          onComplete: () => pulse.destroy(),
+        })
+        affectFrontEnemies(255 + 30 * power, 150, (enemy) => {
+          damageEnemy(enemy, enemy === this.miniBoss ? 2.05 * power : 1.9 * power, 145)
+          enemy.setTint(0xbde9ff)
+          enemy.setVelocity(this.facingDir * (100 + 20 * power), -125)
+          this.time.delayedCall(1050, () => {
+            if (!enemy.active) {
+              return
+            }
+            enemy.clearTint()
+            enemy.setVelocityX(this.facingDir * 45)
+          })
+        })
+        this.botShots.children.each((obj) => {
+          const shot = obj as Phaser.Physics.Arcade.Image
+          if (!shot.active || !shot.visible) {
+            return true
           }
-        }
-        this.statusMessage = 'Thunder Slide: enemy stun!'
+          if (Phaser.Math.Distance.Between(this.player.x, this.player.y, shot.x, shot.y) <= 210 + 20 * power) {
+            shot.disableBody(true, true)
+          }
+          return true
+        })
+        this.time.delayedCall(340, () => this.player.clearTint())
+        this.time.delayedCall(560, () => {
+          if (this.damageReductionMul <= 0.16) {
+            this.damageReductionMul = 1
+          }
+        })
+        this.statusMessage = 'Thunder Slide: arc field shattered incoming fire!'
         this.playTone(760, 0.08)
         break
       case 'GUST_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
-        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
-        pushEnemies(260)
-        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.player.setTint(0xbaf6ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320 + 40 * power))
+        this.player.setVelocityY(-180 - 35 * power)
+        affectFrontEnemies(impactRadiusX + 20, impactRadiusY + 30, (enemy) => {
+          damageEnemy(enemy, enemy === this.miniBoss ? 1.4 * power : 1.1 * power, 180)
+          enemy.setVelocity(this.facingDir * (260 + 30 * power), -160 - 20 * power)
+        })
+        this.time.delayedCall(220, () => this.player.clearTint())
+        this.statusMessage = 'Gust Dash: wind shear launch!'
         this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
-        this.damageReductionMul = 0.45
+        this.damageReductionMul = 0.26
         this.player.setTint(0xc6f6ff)
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + Math.ceil(power))
+        affectFrontEnemies(150 + 20 * power, 120, (enemy) => {
+          damageEnemy(enemy, enemy === this.miniBoss ? 1.2 * power : 0.9 * power, 160)
+          enemy.setTint(0xfff2a8)
+          this.time.delayedCall(300, () => enemy.active && enemy.clearTint())
+        })
         this.time.delayedCall(2200, () => {
           this.damageReductionMul = 1
           this.player.clearTint()
         })
-        this.statusMessage = 'Radiant Barrier active.'
+        this.statusMessage = 'Radiant Barrier active. Light holds the line.'
         this.playTone(520, 0.1)
         break
       case 'FREEZE_PATCH': {
-        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 180, 24, 0xb8f5ff, 0.55)
-        const patchRect = new Phaser.Geom.Rectangle(this.player.x - 90, this.player.y + 36, 180, 24)
+        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 220 + power * 30, 26, 0xb8f5ff, 0.55)
+        this.physics.add.existing(patch, true)
+        const patchRect = new Phaser.Geom.Rectangle(
+          this.player.x - patch.width / 2,
+          this.player.y + 35,
+          patch.width,
+          26,
+        )
         const timer = this.time.addEvent({
-          delay: 70,
-          repeat: 28,
+          delay: 90,
+          repeat: 24,
           callback: () => {
             for (const enemy of enemies) {
               const eBody = enemy.body as Phaser.Physics.Arcade.Body | null
               if (enemy.active && eBody && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
-                enemy.setVelocityX(eBody.velocity.x * 0.82)
+                enemy.setVelocityX(eBody.velocity.x * 0.65)
+                damageEnemy(enemy, enemy === this.miniBoss ? 0.45 * power : 0.35 * power, 180)
               }
             }
           },
         })
-        this.time.delayedCall(2200, () => {
+        this.time.delayedCall(2400, () => {
           timer.remove(false)
           patch.destroy()
         })
-        this.statusMessage = 'Freeze Patch deployed.'
+        this.statusMessage = 'Freeze Patch deployed. The alley locks up hard.'
         this.playTone(410, 0.1)
         break
       }
       case 'MOLTEN_TRAIL': {
-        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
+        const trail = this.add.rectangle(
+          this.player.x - this.facingDir * 40,
+          this.player.y + 42,
+          140 + power * 22,
+          20,
+          0xff6b3d,
+          0.7,
+        )
         this.physics.add.existing(trail, true)
+        affectFrontEnemies(impactRadiusX, 110, (enemy) => {
+          damageEnemy(enemy, enemy === this.miniBoss ? 1.7 * power : 1.35 * power, 150)
+          enemy.setVelocityX(this.facingDir * (160 + 20 * power))
+        })
         const hitEnemy = (enemy: Phaser.Physics.Arcade.Sprite): void => {
           if (!enemy.active) {
             return
           }
-          const now = this.time.now
-          const lastHitAt = Number(enemy.getData('lastHitAt') ?? 0)
-          if (now - lastHitAt < 260) {
-            return
-          }
-          enemy.setData('lastHitAt', now)
-          const hp = Math.max(0, Number(enemy.getData('hp') ?? 1) - 1)
-          enemy.setData('hp', hp)
-          if (hp <= 0) {
-            enemy.disableBody(true, true)
-          }
+          damageEnemy(enemy, enemy === this.miniBoss ? 0.55 * power : 0.45 * power, 210)
         }
         this.physics.add.overlap(trail, this.patrolEnemy, () => hitEnemy(this.patrolEnemy))
         this.physics.add.overlap(trail, this.laserBot, () => hitEnemy(this.laserBot))
-        this.time.delayedCall(2200, () => trail.destroy())
-        this.statusMessage = 'Molten Trail ignited.'
+        this.physics.add.overlap(trail, this.miniBoss, () => hitEnemy(this.miniBoss))
+        this.time.delayedCall(2400, () => trail.destroy())
+        this.statusMessage = 'Molten Trail ignited. Armor starts to glow.'
         this.playTone(320, 0.09)
         break
       }
       case 'FUSION_WAVE':
         if (!this.speedBoostActive) {
           this.speedBoostActive = true
-          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 80, 900)
+          this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 100 + 25 * power, 900)
+          this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+          affectFrontEnemies(impactRadiusX + 10, 130, (enemy) => {
+            damageEnemy(enemy, enemy === this.miniBoss ? 1.4 * power : 1.1 * power, 170)
+            enemy.setVelocityX(this.facingDir * (180 + 30 * power))
+          })
           this.time.delayedCall(2600, () => {
             this.speedBoostActive = false
             this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
           })
         }
-        this.statusMessage = 'Fusion Wave boost active.'
+        this.statusMessage = 'Fusion Wave boost active. Reactor output surges.'
         this.playTone(740, 0.1)
         break
       case 'ABSORB':
-        this.damageReductionMul = 0.6
-        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+        this.damageReductionMul = 0.42
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + Math.ceil(power))
+        affectFrontEnemies(160 + 20 * power, 120, (enemy) => {
+          if (damageEnemy(enemy, enemy === this.miniBoss ? 1.3 * power : 1 * power, 170)) {
+            this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 0.5)
+            enemy.setTint(0xbf7dff)
+            this.time.delayedCall(260, () => enemy.active && enemy.clearTint())
+          }
+        })
         this.time.delayedCall(2600, () => {
           this.damageReductionMul = 1
         })
-        this.statusMessage = 'Absorb active. Defense boosted.'
+        this.statusMessage = 'Absorb active. Enemy force feeds your core.'
         this.playTone(380, 0.1)
         break
       case 'SOLAR_BIND':
-        for (const enemy of enemies) {
-          if (!enemy.active) continue
-          if (Math.abs(enemy.x - this.player.x) < 240 && Math.abs(enemy.y - this.player.y) < 140) {
+        this.player.setTint(0xffd777)
+        this.player.setVelocityY(-220 - 40 * power)
+        const hits = affectFrontEnemies(220 + power * 30, 150, (enemy) => {
+          if (damageEnemy(enemy, enemy === this.miniBoss ? 1.8 * power : 1.6 * power, 160)) {
             enemy.setTint(0xfff2a8)
             enemy.setVelocityX(0)
-            this.time.delayedCall(1200, () => {
-              if (enemy.active) enemy.clearTint()
-            })
+            this.time.delayedCall(900, () => enemy.active && enemy.clearTint())
           }
-        }
-        this.statusMessage = 'Solar Bind: enemies locked.'
+        })
+        this.time.delayedCall(240, () => this.player.clearTint())
+        this.statusMessage = hits > 0 ? 'Solar Bind: branded and pinned!' : 'Solar Bind flashes forward.'
         this.playTone(590, 0.1)
         break
       default:
@@ -1183,9 +1437,6 @@ export class LaserAlleyScene extends Phaser.Scene {
   }
 
   private updateUiText(): void {
-    if (!this.miniBossDefeated && this.miniBoss && !this.miniBoss.active) {
-      this.miniBossDefeated = true
-    }
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
       [
@@ -1200,6 +1451,9 @@ export class LaserAlleyScene extends Phaser.Scene {
         this.statusMessage,
       ].join('\n'),
     )
+    if (this.livesText) {
+      this.livesText.setText(`Lives ${getLivesDisplay()}`)
+    }
   }
 
   private playTone(freq: number, durationSec = 0.06): void {

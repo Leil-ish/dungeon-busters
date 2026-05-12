@@ -15,12 +15,18 @@ export type GameProgress = {
   gameCompleted: boolean
   forgeOfOriginsCleared: boolean
   devUnlockForgeOrigins: boolean
+  meteorDodgeCleared: boolean
+  flameRopeBossCleared: boolean
+  clearedMinigames: Record<string, boolean>
+  platformParts: number
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
+  remainingLives: number
 }
 
 const STORAGE_KEY = 'dungeon_busters_progress_v1'
+export const MAX_LIVES = 5
 
 const defaultProgress: GameProgress = {
   torrentKeyPiece: false,
@@ -37,9 +43,14 @@ const defaultProgress: GameProgress = {
   gameCompleted: false,
   forgeOfOriginsCleared: false,
   devUnlockForgeOrigins: false,
+  meteorDodgeCleared: false,
+  flameRopeBossCleared: false,
+  clearedMinigames: {},
+  platformParts: 0,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
+  remainingLives: MAX_LIVES,
 }
 
 const loadGameProgress = (): GameProgress => {
@@ -68,4 +79,21 @@ export const saveGameProgress = (): void => {
   } catch {
     // no-op for restricted storage environments
   }
+}
+
+export const resetLives = (): void => {
+  gameProgress.remainingLives = MAX_LIVES
+  saveGameProgress()
+}
+
+export const loseLife = (): number => {
+  gameProgress.remainingLives = Math.max(0, gameProgress.remainingLives - 1)
+  saveGameProgress()
+  return gameProgress.remainingLives
+}
+
+export const getLivesDisplay = (): string => {
+  const filled = '♥'.repeat(gameProgress.remainingLives)
+  const empty = '♡'.repeat(Math.max(0, MAX_LIVES - gameProgress.remainingLives))
+  return `${filled}${empty}`
 }

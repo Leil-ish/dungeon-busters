@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { applyCombatDamage, configureCombatant, getCombatHp, getCombatMaxHp } from './combat'
 import {
   DEFAULT_HERO_ID,
   HEROES,
@@ -6,8 +7,9 @@ import {
   type HeroId,
   computeEffectivePlayerStats,
 } from './heroes'
-import { gameProgress, saveGameProgress } from './progress'
+import { gameProgress, getLivesDisplay, loseLife, resetLives, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
+import { addMinigameEntrances } from './minigame-entrances'
 
 type TimedLaser = {
   rect: Phaser.GameObjects.Rectangle
@@ -17,10 +19,27 @@ type TimedLaser = {
   offMs: number
 }
 
+type MoltenPool = {
+  rect: Phaser.GameObjects.Rectangle
+  bounds: Phaser.Geom.Rectangle
+  bubble: Phaser.GameObjects.Ellipse
+}
+
 type EnemyUnit = Phaser.Physics.Arcade.Sprite
+type ForgeArenaState =
+  | 'fusion_idle'
+  | 'fusion_active'
+  | 'fusion_cleared'
+  | 'construct_idle'
+  | 'construct_active'
+  | 'construct_cleared'
+  | 'exomon_idle'
+  | 'exomon_active'
+  | 'exomon_cleared'
+  | 'stage_clear'
 
 export class ForgeOfOriginsScene extends Phaser.Scene {
-  private readonly LEVEL_W = 4600
+  private readonly LEVEL_W = 5200
   private readonly LEVEL_H = 900
 
   private player!: Phaser.Physics.Arcade.Sprite
@@ -50,18 +69,12 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private constructActive = false
   private finalBossActive = false
 
-  private fusionHp = 48
-  private readonly fusionMaxHp = 48
-  private constructHp = 60
-  private readonly constructMaxHp = 60
-  private firstCorruptionHp = 180
-  private readonly firstCorruptionMaxHp = 180
-  private fusionHitCount = 0
-  private constructHitCount = 0
-  private firstCorruptionHitCount = 0
-  private readonly fusionRequiredHits = 60
-  private readonly constructRequiredHits = 78
-  private readonly firstCorruptionRequiredHits = 220
+  private readonly fusionMaxHp = 40
+  private fusionSentinelHp = 40
+  private readonly constructMaxHp = 56
+  private corruptedConstructHp = 56
+  private firstCorruptionHp = 96
+  private readonly firstCorruptionMaxHp = 96
 
   private finalBossDefeated = false
   private finalBossAbsorbActive = false
@@ -73,11 +86,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private timedLasers: TimedLaser[] = []
   private slipperyZones: Phaser.Geom.Rectangle[] = []
   private pitZones: Phaser.Geom.Rectangle[] = []
-  private section2Triggered = false
-  private section3Triggered = false
-  private finalTriggered = false
-  private finalSpawnQueued = false
-  private matterBridgeBuilt = false
+  private moltenPools: MoltenPool[] = []
+  private arenaState: ForgeArenaState = 'fusion_idle'
+  private activeArenaGates: Phaser.GameObjects.Rectangle[] = []
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private fireKey!: Phaser.Input.Keyboard.Key
@@ -86,6 +97,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private kickKey!: Phaser.Input.Keyboard.Key
 
   private uiText!: Phaser.GameObjects.Text
+  private livesText!: Phaser.GameObjects.Text
   private exitPortal: Phaser.GameObjects.Rectangle | null = null
   private exitPortalActive = false
   private lastPortalPromptAt = 0
@@ -107,9 +119,16 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private statusMessage = 'Traverse the Forge of Origins.'
   private stageClearTriggered = false
   private lastShotAt = 0
+  private startX = 140
+  private startY = 680
+  private returningFromMinigame = false
+  private returnMessage = ''
   private lastAbilityAt = 0
+  private abilityPowerScale = 1
   private lastMeleeAt = 0
   private meleeComboStep = 0
+  private chromaforgeCrashArmed = false
+  private chromaforgeCrashDiveStarted = false
   private facingDir = 1
   private bossLastActionAt = 0
   private lastFusionHitAt = 0
@@ -118,8 +137,6 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   private fusionDamageLockUntil = 0
   private constructDamageLockUntil = 0
   private finalBossDamageLockUntil = 0
-  private lastEncounterRecoveryAt = 0
-
   private readonly normalDragX = 860
   private readonly slipperyDragX = 180
   private readonly abilityCooldownMs = 1700
@@ -129,6 +146,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   constructor() {
     super('forge-of-origins')
+  }
+
+  init(data: { fromMinigame?: boolean; returnX?: number; returnY?: number; returnMessage?: string }): void {
+    this.returningFromMinigame = data.fromMinigame ?? false
+    this.startX = data.returnX ?? 140
+    this.startY = data.returnY ?? 680
+    this.returnMessage = data.returnMessage ?? ''
   }
 
   preload(): void {
@@ -158,6 +182,15 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.createPlayerAndEnemies()
     this.createWeapons()
     this.createHazards()
+    addMinigameEntrances(this, {
+      stageKey: 'forge-of-origins',
+      player: this.player,
+      returnScene: 'forge-of-origins',
+      setStatus: (message) => {
+        this.statusMessage = message
+        this.updateUiText()
+      },
+    })
     this.createExitPortal()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
@@ -171,15 +204,36 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.uiText = this.add.text(16, 16, '', {
       color: '#eef5ff',
       fontFamily: 'sans-serif',
-      fontSize: '18px',
+      fontSize: '16px',
       backgroundColor: '#090a1bcc',
       padding: { x: 10, y: 8 },
+      wordWrap: { width: 560 },
+      fixedWidth: 580,
     })
     this.uiText.setDepth(100)
     this.uiText.setScrollFactor(0)
+    this.livesText = this.add.text(this.scale.width - 16, 16, '', {
+      color: '#ffdca8',
+      fontFamily: 'sans-serif',
+      fontSize: '21px',
+      backgroundColor: '#090a1bcc',
+      padding: { x: 10, y: 6 },
+      fixedWidth: 176,
+      align: 'right',
+    })
+    this.livesText.setOrigin(1, 0)
+    this.livesText.setDepth(100)
+    this.livesText.setScrollFactor(0)
+    if (this.returnMessage) {
+      this.statusMessage = this.returnMessage
+    }
     this.updateUiText()
 
-    this.startIntroCutscene()
+    if (this.returningFromMinigame) {
+      this.cutsceneActive = false
+    } else {
+      this.startIntroCutscene()
+    }
     this.scheduleFallingRocks()
     this.events.once('shutdown', () => this.cleanupHealthBars())
   }
@@ -205,6 +259,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
 
     this.updatePlayerMovement()
+    this.updateChromaforgeCrash()
     this.handleCombatInputs()
 
     this.updateCommonEnemies()
@@ -212,27 +267,19 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.updateFinalBoss()
 
     this.updateSectionTriggers()
-    this.ensureEncounterRecovery()
     this.checkHazards()
     this.updateHealthBars()
-
-    // Fail-safe: if the second mini-boss is defeated, force Exomon spawn even if position triggers were skipped.
-    if (this.mini2Defeated && !this.finalBossActive && !this.finalBossDefeated && !this.finalSpawnQueued) {
-      this.finalSpawnQueued = true
-      this.time.delayedCall(350, () => {
-        if (!this.finalBossActive && !this.finalBossDefeated) {
-          this.finalTriggered = true
-          this.startFinalBossSequence()
-        }
-      })
-    }
 
     if (this.exitPortal && this.physics.overlap(this.player, this.exitPortal) && !this.stageClearTriggered) {
       if (this.exitPortalActive) {
         this.completeStage()
       } else if (this.time.now - this.lastPortalPromptAt > 900) {
         this.lastPortalPromptAt = this.time.now
-        this.tryRecoverFinalEncounterNearExit()
+        if (this.arenaState === 'exomon_idle') {
+          this.startFinalBossSequence()
+        } else if (this.arenaState === 'exomon_active' && !this.firstCorruption.active) {
+          this.restoreBossForArena('exomon_active')
+        }
         this.statusMessage = 'Exit locked. Defeat Exomon first.'
         this.updateUiText()
       }
@@ -310,34 +357,39 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private buildGeometry(): void {
     const defs: Array<[number, number, number, number, number]> = [
-      // Section A: Ground run
-      [280, 860, 560, 80, 0x3c3554],
-      [880, 860, 560, 80, 0x3c3554],
-      [1460, 860, 360, 80, 0x3c3554],
+      // Start lane: ground combat.
+      [360, 860, 720, 80, 0x3c3554],
+      [1120, 860, 520, 80, 0x3c3554],
 
-      // Section B: Platform traversal (pit below)
-      [1860, 770, 220, 24, 0x6872b5],
-      [2120, 710, 220, 24, 0x6872b5],
-      [2380, 650, 220, 24, 0x6872b5],
-      [2640, 710, 220, 24, 0x6872b5],
-      [2900, 770, 220, 24, 0x6872b5],
+      // Short platform route with clean jumps.
+      [1520, 770, 180, 24, 0x6872b5],
+      [1760, 700, 180, 24, 0x6872b5],
+      [2000, 630, 180, 24, 0x6872b5],
 
-      // Section C: Ground reset + construct lane
-      [3320, 860, 620, 80, 0x3c3554],
+      // Fusion arena: flat fight floor.
+      [2460, 860, 900, 80, 0x3c3554],
 
-      // Section D: Final climb
-      [3680, 790, 220, 24, 0x7a5fbf],
-      [3920, 730, 220, 24, 0x7a5fbf],
-      [4160, 670, 220, 24, 0x7a5fbf],
+      // Construct transition: one clear climb.
+      [3200, 760, 220, 24, 0x7a5fbf],
+      [3460, 690, 220, 24, 0x7a5fbf],
+      [3720, 620, 220, 24, 0x7a5fbf],
 
-      // Section E: Boss arena (unblocked shooting lane)
-      [4420, 860, 760, 80, 0x3c3554],
+      // Construct arena: flat fight floor.
+      [4140, 860, 920, 80, 0x3c3554],
+
+      // Final approach and boss lane.
+      [4640, 790, 220, 24, 0x9c8cff],
+      [4880, 860, 700, 80, 0x3c3554],
     ]
 
     this.platforms = defs.map(([x, y, w, h, color]) => this.createStaticPlatform(x, y, w, h, color))
 
-    // Platform-only sections: falling here causes pit damage + respawn.
-    this.pitZones = [this.createPitZone(2380, 872, 1500, 56)]
+    this.pitZones = [this.createPitZone(1770, 884, 420, 42), this.createPitZone(3460, 884, 300, 42)]
+    this.createMoltenPool(2140, 846, 120, 24)
+    this.createMoltenPool(2780, 846, 126, 24)
+    this.createMoltenPool(3890, 846, 118, 24)
+    this.createMoltenPool(4395, 846, 134, 24)
+    this.createMoltenPool(4800, 846, 108, 24)
   }
 
   private createPitZone(centerX: number, centerY: number, width: number, height: number): Phaser.Geom.Rectangle {
@@ -345,11 +397,45 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     return new Phaser.Geom.Rectangle(centerX - width / 2, centerY - height / 2, width, height)
   }
 
+  private createMoltenPool(centerX: number, centerY: number, width: number, height: number): void {
+    const crust = this.add.rectangle(centerX, centerY + height * 0.42, width + 10, 12, 0x2e221c, 0.92)
+    crust.setDepth(4)
+    const glow = this.add.ellipse(centerX, centerY + 2, width + 24, height + 18, 0xff6e36, 0.18)
+    glow.setDepth(4)
+    const rect = this.add.rectangle(centerX, centerY, width, height, 0xff7f36, 0.82)
+    rect.setStrokeStyle(2, 0xffc16e, 0.7)
+    rect.setDepth(6)
+    const bubble = this.add.ellipse(centerX - width * 0.18, centerY - 3, 18, 8, 0xffdc9a, 0.45)
+    bubble.setDepth(7)
+    this.tweens.add({
+      targets: [glow, rect],
+      alpha: { from: 0.6, to: 0.95 },
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+    })
+    this.tweens.add({
+      targets: bubble,
+      x: centerX + width * 0.2,
+      scaleX: 1.25,
+      scaleY: 1.15,
+      alpha: { from: 0.18, to: 0.62 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+    })
+    this.moltenPools.push({
+      rect,
+      bubble,
+      bounds: new Phaser.Geom.Rectangle(centerX - width / 2, centerY - height / 2, width, height),
+    })
+  }
+
   private createPlayerAndEnemies(): void {
     const heroTexture = this.textures.exists(this.selectedHero.textureKey) ? this.selectedHero.textureKey : 'hero-micralis'
     const enemyTexture = this.textures.exists('enemy-scout') ? 'enemy-scout' : 'hero-micralis'
 
-    this.player = this.physics.add.sprite(140, 680, heroTexture)
+    this.player = this.physics.add.sprite(this.startX, this.startY, heroTexture)
     if (heroTexture === 'hero-exemon') {
       this.player.setDisplaySize(56, 64)
     }
@@ -357,6 +443,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.player.setGravityY(1200)
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 980)
+    configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
     this.physics.add.collider(this.player, this.platforms)
 
     const spawnEnemy = (x: number, y: number, minX: number, maxX: number): EnemyUnit => {
@@ -364,59 +451,55 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       enemy.setImmovable(true)
       enemy.setCollideWorldBounds(true)
       ;(enemy.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-      enemy.setData('hp', 16)
-      enemy.setData('maxHp', 16)
-      enemy.setData('hitCount', 0)
-      enemy.setData('requiredHits', 22)
-      enemy.setData('lastHitAt', 0)
+      configureCombatant(enemy, { maxHp: 12, widthRatio: 0.72, heightRatio: 0.8 })
       enemy.setData('patrolMin', minX)
       enemy.setData('patrolMax', maxX)
       enemy.setData('speed', 60)
       enemy.setVelocityX(-60)
       this.physics.add.collider(enemy, this.platforms)
-      this.physics.add.overlap(this.player, enemy, () => this.applyDamage(1, 'Enemy hit!'))
+      this.physics.add.overlap(this.player, enemy, () => this.handlePlayerEnemyContact(enemy, 'Enemy hit!'))
       this.commonEnemies.push(enemy)
       return enemy
     }
 
-    spawnEnemy(980, 798, 860, 1120)
-    spawnEnemy(2380, 612, 2280, 2480)
-    spawnEnemy(3440, 798, 3320, 3620)
+    spawnEnemy(980, 798, 900, 1240)
+    spawnEnemy(2460, 798, 2180, 2740)
+    spawnEnemy(4150, 798, 3860, 4420)
 
-    this.fusionSentinel = this.physics.add.sprite(2240, 612, enemyTexture)
+    this.fusionSentinel = this.physics.add.sprite(2460, 780, enemyTexture)
     this.fusionSentinel.setScale(1.2)
     this.fusionSentinel.setTint(0x95f0ff)
     this.fusionSentinel.setImmovable(true)
     this.fusionSentinel.setCollideWorldBounds(true)
     ;(this.fusionSentinel.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    this.fusionSentinel.setData('hp', this.fusionHp)
+    configureCombatant(this.fusionSentinel, { maxHp: this.fusionMaxHp, widthRatio: 0.82, heightRatio: 0.9 })
     this.fusionSentinel.disableBody(true, true)
     this.physics.add.collider(this.fusionSentinel, this.platforms)
-    this.physics.add.overlap(this.player, this.fusionSentinel, () => this.applyDamage(1, 'Fusion Sentinel hit!'))
+    this.physics.add.overlap(this.player, this.fusionSentinel, () => this.handlePlayerEnemyContact(this.fusionSentinel, 'Fusion Sentinel hit!'))
 
-    this.corruptedConstruct = this.physics.add.sprite(3520, 780, enemyTexture)
+    this.corruptedConstruct = this.physics.add.sprite(4140, 770, enemyTexture)
     this.corruptedConstruct.setDisplaySize(140, 140)
     this.corruptedConstruct.setTint(0xc3a5ff)
     this.corruptedConstruct.setImmovable(true)
     this.corruptedConstruct.setCollideWorldBounds(true)
     ;(this.corruptedConstruct.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.corruptedConstruct.body as Phaser.Physics.Arcade.Body).setSize(94, 98, true)
-    this.corruptedConstruct.setData('hp', this.constructHp)
+    configureCombatant(this.corruptedConstruct, { maxHp: this.constructMaxHp, widthRatio: 0.76, heightRatio: 0.86 })
     this.corruptedConstruct.disableBody(true, true)
     this.physics.add.collider(this.corruptedConstruct, this.platforms)
-    this.physics.add.overlap(this.player, this.corruptedConstruct, () => this.applyDamage(1, 'Corrupted Construct impact!'))
+    this.physics.add.overlap(this.player, this.corruptedConstruct, () =>
+      this.handlePlayerEnemyContact(this.corruptedConstruct, 'Corrupted Construct impact!'),
+    )
 
     const finalTexture = this.textures.exists('hero-exemon') ? 'hero-exemon' : 'exomon-boss-block'
-    this.firstCorruption = this.physics.add.sprite(4460, 752, finalTexture)
+    this.firstCorruption = this.physics.add.sprite(4980, 740, finalTexture)
     this.firstCorruption.setDisplaySize(220, 220)
     this.firstCorruption.setImmovable(true)
     this.firstCorruption.setCollideWorldBounds(true)
     ;(this.firstCorruption.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    ;(this.firstCorruption.body as Phaser.Physics.Arcade.Body).setSize(132, 168, true)
-    this.firstCorruption.setData('hp', this.firstCorruptionHp)
+    configureCombatant(this.firstCorruption, { maxHp: this.firstCorruptionMaxHp, widthRatio: 0.72, heightRatio: 0.86 })
     this.firstCorruption.disableBody(true, true)
     this.physics.add.collider(this.firstCorruption, this.platforms)
-    this.physics.add.overlap(this.player, this.firstCorruption, () => this.applyDamage(2, 'Exomon struck!'))
+    this.physics.add.overlap(this.player, this.firstCorruption, () => this.handlePlayerEnemyContact(this.firstCorruption, 'Exomon struck!'))
   }
 
   private createWeapons(): void {
@@ -457,7 +540,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
     this.physics.add.overlap(this.player, this.enemyShots, () => this.applyDamage(1, 'Energy hit!'))
     this.physics.add.overlap(this.player, this.rocks, () => this.applyDamage(1, 'Falling rock!'))
-    this.physics.add.overlap(this.player, this.bossMinions, () => this.applyDamage(1, 'Drone hit!'))
+    this.physics.add.overlap(this.player, this.bossMinions, (_playerObj, minionObj) => {
+      this.handlePlayerEnemyContact(minionObj as EnemyUnit, 'Drone hit!')
+    })
 
     this.physics.add.overlap(this.shots, this.bossMinions, (shotObj, minionObj) => {
       const shot = shotObj as Phaser.Physics.Arcade.Image
@@ -466,21 +551,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         return
       }
       shot.disableBody(true, true)
-      const now = this.time.now
-      const lastHitAt = Number(minion.getData('lastHitAt') ?? 0)
-      if (now - lastHitAt < 400) {
-        return
-      }
-      minion.setData('lastHitAt', now)
-      const hitCount = Number(minion.getData('hitCount') ?? 0) + 1
-      const requiredHits = Number(minion.getData('requiredHits') ?? 10)
-      minion.setData('hitCount', hitCount)
-      const hpMax = Number(minion.getData('maxHp') ?? 1)
-      const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
-      const hp = hpMax * ratio
-      minion.setData('hp', hp)
-      if (hitCount >= requiredHits || hp <= 0) {
-        minion.disableBody(true, true)
+      const result = applyCombatDamage(this, minion, 1, 220)
+      if (result.died) {
+        const bar = this.minionBars.get(minion)
+        if (bar) {
+          bar.destroy()
+          this.minionBars.delete(minion)
+        }
       }
     })
 
@@ -492,40 +569,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
           return
         }
         shot.disableBody(true, true)
-        const now = this.time.now
-        const lastHitAt = Number(target.getData('lastHitAt') ?? 0)
-      if (now - lastHitAt < 400) {
-        return
-      }
-        target.setData('lastHitAt', now)
-        const hitCount = Number(target.getData('hitCount') ?? 0) + 1
-        const requiredHits = Number(target.getData('requiredHits') ?? 10)
-        target.setData('hitCount', hitCount)
-        const hpMax = Number(target.getData('maxHp') ?? 1)
-        const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
-        const hp = hpMax * ratio
-        target.setData('hp', hp)
-        if (hitCount >= requiredHits || hp <= 0) {
-          target.disableBody(true, true)
-        }
+        applyCombatDamage(this, target, 1, 220)
       })
     }
-
-    this.physics.add.overlap(this.shots, this.fusionSentinel, (shotObj) => {
-      if (!this.fusionActive || !this.fusionSentinel.active) {
-        return
-      }
-      ;(shotObj as Phaser.Physics.Arcade.Image).disableBody(true, true)
-      this.damageFusionSentinel(1)
-    })
-
-    this.physics.add.overlap(this.shots, this.corruptedConstruct, (shotObj) => {
-      if (!this.constructActive || !this.corruptedConstruct.active) {
-        return
-      }
-      ;(shotObj as Phaser.Physics.Arcade.Image).disableBody(true, true)
-      this.damageCorruptedConstruct(1)
-    })
 
     this.physics.add.overlap(this.shots, this.firstCorruption, (shotObj) => {
       if (!this.finalBossActive || this.finalBossDefeated || !this.firstCorruption.active) {
@@ -573,7 +619,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private createExitPortal(): void {
-    this.exitPortal = this.add.rectangle(this.LEVEL_W - 120, 760, 56, 96, 0xa7e2ff, 0.25)
+    this.exitPortal = this.add.rectangle(this.LEVEL_W - 140, 758, 56, 96, 0xa7e2ff, 0.25)
     this.exitPortal.setStrokeStyle(2, 0xffb0b0, 0.9)
     this.exitPortal.setFillStyle(0xff6a6a, 0.35)
     this.exitPortal.setVisible(true)
@@ -678,42 +724,13 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.lastAbilityAt = now
 
     if (this.selectedHero.id === 'CHROMAFORGE') {
-      const pulse = this.add.image(this.player.x, this.player.y, 'energy-pulse')
-      pulse.setDepth(30)
-      this.tweens.add({ targets: pulse, alpha: 0, scale: 3.6, duration: 260, onComplete: () => pulse.destroy() })
-
-      const stunRadius = 240
-      const stunUntil = this.time.now + 2300
-      for (const enemy of this.commonEnemies) {
-        if (enemy.active && Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y) < stunRadius) {
-          enemy.setData('stunUntil', stunUntil)
-        }
-      }
-      if (this.fusionActive && Phaser.Math.Distance.Between(this.player.x, this.player.y, this.fusionSentinel.x, this.fusionSentinel.y) < stunRadius) {
-        this.fusionSentinel.setData('stunUntil', stunUntil)
-      }
-      if (this.constructActive && Phaser.Math.Distance.Between(this.player.x, this.player.y, this.corruptedConstruct.x, this.corruptedConstruct.y) < stunRadius) {
-        this.corruptedConstruct.setData('stunUntil', stunUntil)
-      }
-      if (this.finalBossActive && Phaser.Math.Distance.Between(this.player.x, this.player.y, this.firstCorruption.x, this.firstCorruption.y) < stunRadius) {
-        this.firstCorruption.setData('stunUntil', stunUntil)
-        if (this.finalBossAbsorbActive) {
-          this.finalBossAbsorbInterrupted = true
-          this.finalBossAbsorbActive = false
-          this.statusMessage = 'Solar Bind interrupted absorption!'
-          this.playTone(780, 0.1)
-          this.updateUiText()
-          return
-        }
-      }
-
-      this.statusMessage = 'Solar Bind cast. Enemies stunned.'
-      this.playTone(700, 0.1)
+      this.startChromaforgeCrash()
       this.updateUiText()
       return
     }
 
     const targets: EnemyUnit[] = [...this.commonEnemies]
+    const power = this.abilityPowerScale
     if (this.fusionActive && this.fusionSentinel.active) {
       targets.push(this.fusionSentinel)
     }
@@ -722,6 +739,57 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
     if (this.finalBossActive && this.firstCorruption.active) {
       targets.push(this.firstCorruption)
+    }
+    const damageTarget = (enemy: EnemyUnit, amount: number, cooldownMs = 220): boolean => {
+      if (!enemy.active) {
+        return false
+      }
+      if (enemy === this.fusionSentinel) {
+        const prevHp = this.fusionSentinelHp
+        this.lastFusionHitAt = Math.max(0, this.lastFusionHitAt - Math.max(0, 360 - cooldownMs))
+        this.damageFusionSentinel(amount)
+        return this.fusionSentinelHp < prevHp
+      }
+      if (enemy === this.corruptedConstruct) {
+        const prevHp = this.corruptedConstructHp
+        this.lastConstructHitAt = Math.max(0, this.lastConstructHitAt - Math.max(0, 360 - cooldownMs))
+        this.damageCorruptedConstruct(amount)
+        return this.corruptedConstructHp < prevHp
+      }
+      if (enemy === this.firstCorruption) {
+        const prevHp = this.firstCorruptionHp
+        this.lastFirstCorruptionHitAt = Math.max(0, this.lastFirstCorruptionHitAt - Math.max(0, 520 - cooldownMs))
+        this.damageFirstCorruption(amount)
+        return this.firstCorruptionHp < prevHp
+      }
+      const result = applyCombatDamage(this, enemy, amount, cooldownMs)
+      if (!result.applied) {
+        return false
+      }
+      if (result.died) {
+        enemy.disableBody(true, true)
+      }
+      return true
+    }
+    const impactRadiusX = 185 + power * 45
+    const impactRadiusY = 130 + power * 24
+    const affectFrontTargets = (
+      rangeX: number,
+      rangeY: number,
+      handler: (enemy: EnemyUnit) => void,
+    ): number => {
+      let hits = 0
+      for (const enemy of targets) {
+        if (!enemy.active) continue
+        const dx = enemy.x - this.player.x
+        const dy = Math.abs(enemy.y - this.player.y)
+        const inFront = this.facingDir > 0 ? dx >= 0 : dx <= 0
+        if (inFront && Math.abs(dx) <= rangeX && dy <= rangeY) {
+          hits += 1
+          handler(enemy)
+        }
+      }
+      return hits
     }
 
     const pushTargets = (push = 190): void => {
@@ -737,97 +805,302 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
     switch (this.selectedHero.specialAbility) {
       case 'PHOTON_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 220))
-        pushTargets(160)
-        this.statusMessage = 'Photon Dash: precision burst!'
+        this.player.setTint(0x9ed8ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 250 + 40 * power))
+        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -80))
+        affectFrontTargets(impactRadiusX, impactRadiusY, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.7 * power : 1.35 * power, 170)
+          enemy.setVelocityX(this.facingDir * (220 + 35 * power))
+        })
+        this.time.delayedCall(200, () => this.player.clearTint())
+        this.statusMessage = 'Photon Dash: lances through the forge line!'
         this.playTone(700, 0.07)
         break
       case 'THUNDER_SLIDE':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 280))
-        pushTargets(210)
-        for (const enemy of targets) {
-          if (!enemy.active) continue
-          if (Math.abs(enemy.x - this.player.x) < 170 && Math.abs(enemy.y - this.player.y) < 120) {
-            enemy.setTint(0xbde9ff)
-            enemy.setVelocityX(0)
-            enemy.setData('stunUntil', this.time.now + 550)
-            this.time.delayedCall(550, () => enemy.active && enemy.clearTint())
+        this.damageReductionMul = Math.min(this.damageReductionMul, 0.16)
+        this.player.setTint(0xbde9ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 350 + 45 * power))
+        pushTargets(280 + 35 * power)
+        const pulse = this.add.circle(this.player.x + this.facingDir * 36, this.player.y + 4, 28, 0xbde9ff, 0.42)
+        pulse.setDepth(28)
+        this.tweens.add({
+          targets: pulse,
+          scale: 4.6,
+          alpha: 0,
+          duration: 260,
+          onComplete: () => pulse.destroy(),
+        })
+        affectFrontTargets(265 + 30 * power, 155, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.95 * power : 1.85 * power, 145)
+          enemy.setTint(0xbde9ff)
+          enemy.setVelocity(this.facingDir * (100 + 20 * power), -130)
+          enemy.setData('stunUntil', this.time.now + 1050)
+          this.time.delayedCall(1050, () => {
+            if (!enemy.active) {
+              return
+            }
+            enemy.clearTint()
+            enemy.setVelocityX(this.facingDir * 45)
+          })
+        })
+        this.enemyShots.children.each((obj) => {
+          const shot = obj as Phaser.Physics.Arcade.Image
+          if (!shot.active || !shot.visible) {
+            return true
           }
-        }
-        this.statusMessage = 'Thunder Slide: enemy stun!'
+          if (Phaser.Math.Distance.Between(this.player.x, this.player.y, shot.x, shot.y) <= 220 + 20 * power) {
+            shot.disableBody(true, true)
+          }
+          return true
+        })
+        this.bossMinions.children.each((obj) => {
+          const minion = obj as EnemyUnit
+          if (!minion.active) {
+            return true
+          }
+          if (Phaser.Math.Distance.Between(this.player.x, this.player.y, minion.x, minion.y) <= 180 + 20 * power) {
+            damageTarget(minion, 1.3 * power, 120)
+          }
+          return true
+        })
+        this.time.delayedCall(340, () => this.player.clearTint())
+        this.time.delayedCall(560, () => {
+          if (this.damageReductionMul <= 0.16) {
+            this.damageReductionMul = 1
+          }
+        })
+        this.statusMessage = 'Thunder Slide: arc field collapsed the forge fire!'
         this.playTone(760, 0.08)
         break
       case 'GUST_DASH':
-        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 320))
-        this.player.setVelocityY(Math.min((this.player.body as Phaser.Physics.Arcade.Body).velocity.y, -120))
-        pushTargets(260)
-        this.statusMessage = 'Gust Dash: high-speed wind burst!'
+        this.player.setTint(0xbaf6ff)
+        this.player.setVelocityX(this.facingDir * (this.effectiveStats.maxVelocityX + 330 + 35 * power))
+        this.player.setVelocityY(-200 - 35 * power)
+        affectFrontTargets(impactRadiusX + 25, impactRadiusY + 35, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.35 * power : 1.1 * power, 180)
+          enemy.setVelocity(this.facingDir * (270 + 25 * power), -170 - 25 * power)
+        })
+        this.time.delayedCall(220, () => this.player.clearTint())
+        this.statusMessage = 'Gust Dash: wind shear launch!'
         this.playTone(640, 0.08)
         break
       case 'RADIANT_BARRIER':
-        this.damageReductionMul = 0.45
+        this.damageReductionMul = 0.24
         this.player.setTint(0xc6f6ff)
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + Math.ceil(power))
+        affectFrontTargets(160 + 20 * power, 130, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.2 * power : 0.9 * power, 160)
+          enemy.setTint(0xfff2a8)
+          this.time.delayedCall(320, () => enemy.active && enemy.clearTint())
+        })
         this.time.delayedCall(2200, () => {
           this.damageReductionMul = 1
           this.player.clearTint()
         })
-        this.statusMessage = 'Radiant Barrier active.'
+        this.statusMessage = 'Radiant Barrier active. Light holds the line.'
         this.playTone(520, 0.1)
         break
       case 'FREEZE_PATCH': {
-        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 180, 24, 0xb8f5ff, 0.55)
-        const patchRect = new Phaser.Geom.Rectangle(this.player.x - 90, this.player.y + 36, 180, 24)
+        const patch = this.add.rectangle(this.player.x, this.player.y + 48, 220 + power * 30, 26, 0xb8f5ff, 0.55)
+        this.physics.add.existing(patch, true)
+        const patchRect = new Phaser.Geom.Rectangle(
+          this.player.x - patch.width / 2,
+          this.player.y + 35,
+          patch.width,
+          26,
+        )
         const timer = this.time.addEvent({
-          delay: 70,
-          repeat: 28,
+          delay: 90,
+          repeat: 24,
           callback: () => {
             for (const enemy of targets) {
               const body = enemy.body as Phaser.Physics.Arcade.Body | null
               if (enemy.active && body && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
-                enemy.setVelocityX(body.velocity.x * 0.82)
+                enemy.setVelocityX(body.velocity.x * 0.6)
+                damageTarget(enemy, enemy === this.firstCorruption ? 0.4 * power : 0.3 * power, 180)
               }
             }
           },
         })
-        this.time.delayedCall(2200, () => {
+        this.time.delayedCall(2400, () => {
           timer.remove(false)
           patch.destroy()
         })
-        this.statusMessage = 'Freeze Patch deployed.'
+        this.statusMessage = 'Freeze Patch deployed. The arena floor seizes up.'
         this.playTone(410, 0.1)
         break
       }
       case 'MOLTEN_TRAIL': {
-        const trail = this.add.rectangle(this.player.x - this.facingDir * 36, this.player.y + 42, 120, 18, 0xff6b3d, 0.7)
+        const trail = this.add.rectangle(
+          this.player.x - this.facingDir * 40,
+          this.player.y + 42,
+          150 + power * 24,
+          20,
+          0xff6b3d,
+          0.7,
+        )
         this.physics.add.existing(trail, true)
-        this.physics.add.overlap(trail, this.fusionSentinel, () => this.fusionActive && this.damageFusionSentinel(1))
-        this.physics.add.overlap(trail, this.corruptedConstruct, () => this.constructActive && this.damageCorruptedConstruct(1))
-        this.physics.add.overlap(trail, this.firstCorruption, () => this.finalBossActive && this.damageFirstCorruption(1))
-        this.time.delayedCall(2200, () => trail.destroy())
-        this.statusMessage = 'Molten Trail ignited.'
+        affectFrontTargets(impactRadiusX, 110, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.55 * power : 1.3 * power, 150)
+          enemy.setVelocityX(this.facingDir * (170 + 20 * power))
+        })
+        for (const enemy of targets) {
+          this.physics.add.overlap(trail, enemy, () => {
+            damageTarget(enemy, enemy === this.firstCorruption ? 0.55 * power : 0.45 * power, 210)
+          })
+        }
+        this.time.delayedCall(2400, () => trail.destroy())
+        this.statusMessage = 'Molten Trail ignited. The forge floor starts burning.'
         this.playTone(320, 0.09)
         break
       }
       case 'FUSION_WAVE':
-        this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 80, 980)
+        this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 110 + 20 * power, 980)
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+        affectFrontTargets(impactRadiusX + 15, 135, (enemy) => {
+          damageTarget(enemy, enemy === this.firstCorruption ? 1.35 * power : 1.1 * power, 170)
+          enemy.setVelocityX(this.facingDir * (190 + 30 * power))
+        })
         this.time.delayedCall(2600, () => {
           this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 980)
         })
-        this.statusMessage = 'Fusion Wave boost active.'
+        this.statusMessage = 'Fusion Wave boost active. Reactor output surges.'
         this.playTone(740, 0.1)
         break
       case 'ABSORB':
-        this.damageReductionMul = 0.6
-        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 1)
+        this.damageReductionMul = 0.4
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + Math.ceil(power))
+        affectFrontTargets(170 + 20 * power, 130, (enemy) => {
+          if (damageTarget(enemy, enemy === this.firstCorruption ? 1.2 * power : 1 * power, 170)) {
+            this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 0.5)
+            enemy.setTint(0xbf7dff)
+            this.time.delayedCall(260, () => enemy.active && enemy.clearTint())
+          }
+        })
         this.time.delayedCall(2600, () => {
           this.damageReductionMul = 1
         })
-        this.statusMessage = 'Absorb active. Defense boosted.'
+        this.statusMessage = 'Absorb active. Enemy force feeds your core.'
         this.playTone(380, 0.1)
+        break
+      case 'SOLAR_BIND':
+        this.player.setTint(0xffd777)
+        this.player.setVelocityY(-220 - 40 * power)
+        const hits = affectFrontTargets(230 + power * 30, 160, (enemy) => {
+          if (damageTarget(enemy, enemy === this.firstCorruption ? 1.7 * power : 1.5 * power, 160)) {
+            enemy.setTint(0xfff2a8)
+            enemy.setVelocityX(0)
+            this.time.delayedCall(900, () => enemy.active && enemy.clearTint())
+          }
+        })
+        this.time.delayedCall(240, () => this.player.clearTint())
+        this.statusMessage = hits > 0 ? 'Solar Bind: branded and pinned!' : 'Solar Bind flashes forward.'
+        this.playTone(590, 0.1)
         break
       default:
         this.statusMessage = `${this.selectedHero.moves.special.name}: Coming soon`
     }
+    this.updateUiText()
+  }
+
+  private startChromaforgeCrash(): void {
+    this.chromaforgeCrashArmed = true
+    this.chromaforgeCrashDiveStarted = false
+    this.player.setTint(0xf6d3ff)
+    this.player.setVelocityX(this.facingDir * 120)
+    this.player.setVelocityY(-560)
+    this.statusMessage = 'Chromaforge Crash armed!'
+    this.playTone(820, 0.1)
+  }
+
+  private updateChromaforgeCrash(): void {
+    if (!this.chromaforgeCrashArmed || this.cutsceneActive) {
+      return
+    }
+    const body = this.player.body as Phaser.Physics.Arcade.Body | null
+    if (!body) {
+      return
+    }
+    if (!this.chromaforgeCrashDiveStarted && body.velocity.y >= -30) {
+      this.chromaforgeCrashDiveStarted = true
+      this.player.setVelocityY(980)
+      return
+    }
+    if (!this.chromaforgeCrashDiveStarted || !body.blocked.down) {
+      return
+    }
+
+    this.chromaforgeCrashArmed = false
+    this.chromaforgeCrashDiveStarted = false
+    this.player.clearTint()
+    this.applyChromaforgeCrashImpact()
+  }
+
+  private applyChromaforgeCrashImpact(): void {
+    const pulse = this.add.circle(this.player.x, this.player.y + 18, 34, 0xffd0ff, 0.5)
+    pulse.setDepth(30)
+    this.tweens.add({
+      targets: pulse,
+      alpha: 0,
+      scale: 3.4,
+      duration: 220,
+      onComplete: () => pulse.destroy(),
+    })
+
+    let hits = 0
+    const hitBounds = new Phaser.Geom.Rectangle(this.player.x - 120, this.player.y - 10, 240, 90)
+    const hitEnemy = (enemy: EnemyUnit, damage: number): void => {
+      if (!enemy.active || !Phaser.Geom.Intersects.RectangleToRectangle(hitBounds, enemy.getBounds())) {
+        return
+      }
+      hits += 1
+      if (enemy === this.fusionSentinel) {
+        this.damageFusionSentinel(damage)
+        return
+      }
+      if (enemy === this.corruptedConstruct) {
+        this.damageCorruptedConstruct(damage + 2)
+        return
+      }
+      if (enemy === this.firstCorruption) {
+        this.damageFirstCorruption(damage)
+        return
+      }
+      applyCombatDamage(this, enemy, damage, 120)
+      if (Number(enemy.getData('hp') ?? 1) <= 0) {
+        enemy.disableBody(true, true)
+      }
+    }
+
+    for (const enemy of this.commonEnemies) {
+      hitEnemy(enemy, 5)
+    }
+    if (this.fusionActive) {
+      hitEnemy(this.fusionSentinel, 6)
+    }
+    if (this.constructActive) {
+      hitEnemy(this.corruptedConstruct, 6)
+    }
+    if (this.finalBossActive) {
+      hitEnemy(this.firstCorruption, 6)
+    }
+    this.bossMinions.children.each((obj) => {
+      const minion = obj as EnemyUnit
+      if (!minion.active || !Phaser.Geom.Intersects.RectangleToRectangle(hitBounds, minion.getBounds())) {
+        return true
+      }
+      hits += 1
+      minion.disableBody(true, true)
+      const bar = this.minionBars.get(minion)
+      if (bar) {
+        bar.destroy()
+        this.minionBars.delete(minion)
+      }
+      return true
+    })
+
+    this.statusMessage = hits > 0 ? `Chromaforge Crash hit ${hits}!` : 'Chromaforge Crash landed.'
+    this.playTone(260, 0.14)
     this.updateUiText()
   }
 
@@ -883,22 +1156,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       } else if (target === this.firstCorruption) {
         this.damageFirstCorruption(damage)
       } else {
-        const now = this.time.now
-        const lastHitAt = Number(target.getData('lastHitAt') ?? 0)
-        if (now - lastHitAt < 400) {
-          continue
-        }
-        target.setData('lastHitAt', now)
-        const hitCount = Number(target.getData('hitCount') ?? 0) + 1
-        const requiredHits = Number(target.getData('requiredHits') ?? 10)
-        target.setData('hitCount', hitCount)
-        const hpMax = Number(target.getData('maxHp') ?? 1)
-        const ratio = Phaser.Math.Clamp(1 - hitCount / requiredHits, 0, 1)
-        const hp = hpMax * ratio
-        target.setData('hp', hp)
-        if (hitCount >= requiredHits || hp <= 0) {
-          target.disableBody(true, true)
-        }
+        applyCombatDamage(this, target, damage, 220)
       }
     }
   }
@@ -929,6 +1187,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private updateMiniBosses(): void {
     if (this.fusionActive && this.fusionSentinel.active) {
+      this.checkFusionSentinelShotHits()
       const stunUntil = Number(this.fusionSentinel.getData('stunUntil') ?? 0)
       if (this.time.now < stunUntil) {
         this.fusionSentinel.setTint(0xd8f6ff)
@@ -942,6 +1201,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
 
     if (this.constructActive && this.corruptedConstruct.active) {
+      this.checkCorruptedConstructShotHits()
       const stunUntil = Number(this.corruptedConstruct.getData('stunUntil') ?? 0)
       if (this.time.now < stunUntil) {
         this.corruptedConstruct.setTint(0xd9d0ff)
@@ -965,6 +1225,96 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
   }
 
+  private checkFusionSentinelShotHits(): void {
+    if (!this.fusionActive || !this.fusionSentinel.active || this.mini1Defeated) {
+      return
+    }
+    const sentinelBounds = this.fusionSentinel.getBounds()
+    this.shots.children.each((obj) => {
+      const shot = obj as Phaser.Physics.Arcade.Image
+      if (!shot.active || !shot.visible) {
+        return true
+      }
+      if (!Phaser.Geom.Intersects.RectangleToRectangle(shot.getBounds(), sentinelBounds)) {
+        return true
+      }
+      shot.disableBody(true, true)
+      this.damageFusionSentinel(1)
+      return false
+    })
+  }
+
+  private checkCorruptedConstructShotHits(): void {
+    if (!this.constructActive || !this.corruptedConstruct.active || this.mini2Defeated) {
+      return
+    }
+    const constructBounds = this.corruptedConstruct.getBounds()
+    this.shots.children.each((obj) => {
+      const shot = obj as Phaser.Physics.Arcade.Image
+      if (!shot.active || !shot.visible) {
+        return true
+      }
+      if (!Phaser.Geom.Intersects.RectangleToRectangle(shot.getBounds(), constructBounds)) {
+        return true
+      }
+      shot.disableBody(true, true)
+      this.damageCorruptedConstruct(1)
+      return false
+    })
+  }
+
+  private handlePlayerEnemyContact(enemy: EnemyUnit, message: string): void {
+    if (!enemy.active) {
+      return
+    }
+    if (this.tryStompEnemy(enemy)) {
+      return
+    }
+    this.applyDamage(1, message)
+  }
+
+  private tryStompEnemy(enemy: EnemyUnit): boolean {
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body | null
+    const enemyBody = enemy.body as Phaser.Physics.Arcade.Body | null
+    if (!playerBody || !enemyBody || !enemy.active || this.cutsceneActive) {
+      return false
+    }
+    if (playerBody.velocity.y < 140) {
+      return false
+    }
+    const playerBounds = this.player.getBounds()
+    const enemyBounds = enemy.getBounds()
+    const horizontalOverlap = playerBounds.right > enemyBounds.left + 10 && playerBounds.left < enemyBounds.right - 10
+    const stompWindow = enemy === this.firstCorruption ? Math.max(26, enemy.displayHeight * 0.18) : 12
+    const comingFromAbove = playerBounds.bottom <= enemyBounds.centerY + stompWindow
+    if (!horizontalOverlap || !comingFromAbove) {
+      return false
+    }
+
+    this.player.setVelocityY(enemy === this.firstCorruption ? -360 : -320)
+    if (enemy === this.fusionSentinel) {
+      this.damageFusionSentinel(2)
+    } else if (enemy === this.corruptedConstruct) {
+      this.damageCorruptedConstruct(2)
+    } else if (enemy === this.firstCorruption) {
+      this.damageFirstCorruption(2)
+    } else if (this.bossMinions.contains(enemy)) {
+      const result = applyCombatDamage(this, enemy, 2, 220)
+      if (result.died) {
+        const bar = this.minionBars.get(enemy)
+        if (bar) {
+          bar.destroy()
+          this.minionBars.delete(enemy)
+        }
+      }
+    } else {
+      applyCombatDamage(this, enemy, 2, 220)
+    }
+    this.statusMessage = 'Stomp hit!'
+    this.updateUiText()
+    return true
+  }
+
   private updateFinalBoss(): void {
     if (!this.finalBossActive || !this.firstCorruption.active || this.finalBossDefeated) {
       return
@@ -980,9 +1330,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     const phase = this.getFinalBossPhase()
     const speed = phase === 1 ? 1.5 : phase === 2 ? 2.1 : 2.8
     this.firstCorruption.x += this.chromaforgeDirection() * speed
-    if (this.firstCorruption.x < 4300) {
+    if (this.firstCorruption.x < 4840) {
       this.firstCorruption.setData('dir', 1)
-    } else if (this.firstCorruption.x > 4540) {
+    } else if (this.firstCorruption.x > 5100) {
       this.firstCorruption.setData('dir', -1)
     }
 
@@ -1100,13 +1450,20 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     minion.setVisible(true)
     minion.setCollideWorldBounds(true)
     ;(minion.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
-    minion.setData('hp', 8)
-    minion.setData('maxHp', 8)
-    minion.setData('hitCount', 0)
-    minion.setData('requiredHits', 10)
-    minion.setData('lastHitAt', 0)
+    configureCombatant(minion, { maxHp: 12, widthRatio: 0.72, heightRatio: 0.8 })
+    const spawnX = this.corruptedConstruct.x + Phaser.Math.Between(-68, 68)
+    this.playForgeBreachEffect(spawnX, 842, 0xffb27a, 30)
+    minion.setPosition(spawnX, 882)
+    minion.setAlpha(0)
     minion.setVelocityX(Phaser.Math.Between(-110, 110))
     this.physics.add.collider(minion, this.platforms)
+    this.tweens.add({
+      targets: minion,
+      y: this.corruptedConstruct.y + 26,
+      alpha: 1,
+      duration: 260,
+      ease: 'Quad.out',
+    })
 
     this.time.delayedCall(3000, () => {
       if (minion.active) {
@@ -1191,6 +1548,12 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         return
       }
     }
+    for (const moltenPool of this.moltenPools) {
+      if (Phaser.Geom.Intersects.RectangleToRectangle(pBounds, moltenPool.bounds)) {
+        this.applyDamage(this.playerMaxHealth * 5, 'Melted in the forge core!', true)
+        return
+      }
+    }
     for (const laser of this.timedLasers) {
       if (laser.active && Phaser.Geom.Intersects.RectangleToRectangle(pBounds, laser.bounds)) {
         this.applyDamage(1, 'Laser hazard!')
@@ -1200,110 +1563,71 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private updateSectionTriggers(): void {
-    if (!this.section2Triggered && this.player.x > 1700) {
-      this.section2Triggered = true
+    if (this.arenaState === 'fusion_idle' && this.player.x > 2240) {
       this.startFusionSentinelEncounter()
     }
-    if (this.section2Triggered && !this.mini1Defeated && !this.fusionActive && !this.fusionSentinel.active && this.player.x > 1820) {
-      this.startFusionSentinelEncounter()
+    if (this.arenaState === 'fusion_active' && !this.fusionSentinel.active && !this.mini1Defeated) {
+      this.restoreBossForArena('fusion_active')
     }
 
-    if (!this.section3Triggered && (this.player.x > 3000 || this.mini1Defeated)) {
-      this.section3Triggered = true
+    if (this.arenaState === 'construct_idle' && this.mini1Defeated && this.player.x > 4040) {
       this.startMatterBridgeSequence()
     }
-    if (this.section3Triggered && !this.mini2Defeated && !this.constructActive && !this.corruptedConstruct.active && this.player.x > 3340) {
-      this.startCorruptedConstructEncounter()
+    if (this.arenaState === 'construct_active' && !this.corruptedConstruct.active && !this.mini2Defeated) {
+      this.restoreBossForArena('construct_active')
     }
 
-    if (!this.finalTriggered && this.player.x > 4200 && this.mini2Defeated) {
-      this.finalTriggered = true
+    if (this.arenaState === 'exomon_idle' && this.mini2Defeated && this.player.x > 4940) {
       this.startFinalBossSequence()
     }
-    if (!this.finalTriggered && this.player.x > 4400) {
-      this.finalTriggered = true
-      this.startFinalBossSequence()
+    if (this.arenaState === 'exomon_active' && !this.firstCorruption.active && !this.finalBossDefeated) {
+      this.restoreBossForArena('exomon_active')
     }
-  }
-
-  private ensureEncounterRecovery(): void {
-    if (this.cutsceneActive) {
-      return
-    }
-    if (this.time.now - this.lastEncounterRecoveryAt < 850) {
-      return
-    }
-    this.lastEncounterRecoveryAt = this.time.now
-
-    if (this.section2Triggered && !this.mini1Defeated && !this.fusionSentinel.active && !this.fusionActive) {
-      this.fusionActive = true
-      this.fusionSentinel.enableBody(true, Phaser.Math.Clamp(this.player.x + 150, 2060, 2400), 612, true, true)
-      this.fusionSentinel.setVisible(true)
-      this.statusMessage = 'Fusion Sentinel re-engaged.'
-      this.updateUiText()
-      return
-    }
-
-    if (this.section3Triggered && !this.mini2Defeated && !this.corruptedConstruct.active && !this.constructActive) {
-      this.constructActive = true
-      this.corruptedConstruct.enableBody(true, Phaser.Math.Clamp(this.player.x + 180, 3400, 3720), 780, true, true)
-      this.corruptedConstruct.setVisible(true)
-      this.statusMessage = 'Corrupted Construct re-engaged.'
-      this.updateUiText()
-      return
-    }
-
-    if (this.finalTriggered && !this.finalBossDefeated && !this.firstCorruption.active) {
-      this.finalBossActive = true
-      const spawnX = Phaser.Math.Clamp(this.player.x + 180, 4340, 4500)
-      this.firstCorruption.enableBody(true, spawnX, 752, true, true)
-      this.firstCorruption.setVisible(true)
-      this.firstCorruption.setActive(true)
-      this.bossLastActionAt = this.time.now - 1000
-      this.statusMessage = 'Exomon re-engaged.'
-      this.updateUiText()
-    }
-  }
-
-  private tryRecoverFinalEncounterNearExit(): void {
-    if (this.finalBossDefeated) {
-      return
-    }
-    if (this.firstCorruption.active && this.finalBossActive) {
-      return
-    }
-    this.finalTriggered = true
-    this.finalBossActive = true
-    const spawnX = Phaser.Math.Clamp(this.player.x - 120, 4340, 4500)
-    this.firstCorruption.enableBody(true, spawnX, 752, true, true)
-    this.firstCorruption.setVisible(true)
-    this.firstCorruption.setActive(true)
-    this.bossLastActionAt = this.time.now - 1000
   }
 
   private startFusionSentinelEncounter(): void {
+    if (this.mini1Defeated || this.fusionActive) {
+      return
+    }
+    this.closeArenaGates(2050, 2890)
+    this.arenaState = 'fusion_active'
     this.fusionActive = true
-    this.fusionHp = this.fusionMaxHp
-    this.fusionHitCount = 0
+    this.fusionSentinelHp = this.fusionMaxHp
+    configureCombatant(this.fusionSentinel, {
+      maxHp: this.fusionMaxHp,
+      widthRatio: 0.82,
+      heightRatio: 0.9,
+      resetHp: true,
+    })
     this.lastFusionHitAt = 0
-    this.fusionDamageLockUntil = this.time.now + 1100
-    this.fusionSentinel.enableBody(true, 2240, 612, true, true)
+    this.fusionDamageLockUntil = this.time.now + 700
+    this.fusionSentinel.enableBody(true, 2460, 910, true, true)
+    configureCombatant(this.fusionSentinel, {
+      maxHp: this.fusionMaxHp,
+      widthRatio: 0.82,
+      heightRatio: 0.9,
+      resetHp: false,
+    })
+    this.fusionSentinel.setData('hp', this.fusionSentinelHp)
+    this.fusionSentinel.setVelocity(0, 0)
+    this.checkpointX = 2300
+    this.checkpointY = 700
     this.startDialogue(
       [
         'Mini-Boss: Fusion Sentinel',
         'It rotates elements and fires composite bursts.',
+        'It is surfacing straight out of the forge floor.',
         'Use Solar Bind to control the tempo.',
         'Press Space to engage.',
       ],
       () => {
-        this.statusMessage = 'Fusion Sentinel engaged.'
-        this.updateUiText()
+        this.raiseBossFromForge(this.fusionSentinel, 2460, 910, 780, 0x9be8ff, 'Fusion Sentinel breached the forge floor!')
       },
     )
   }
 
   private startMatterBridgeSequence(): void {
-    if (this.matterBridgeBuilt) {
+    if (this.mini2Defeated || this.constructActive || this.arenaState !== 'construct_idle') {
       return
     }
     this.startDialogue(
@@ -1311,55 +1635,51 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         'Chromaforge: I arrived with nothing but a pile of matter.',
         'Chromaforge: I shaped it.',
         'Chromaforge: I forged this world.',
-        'Press Space to form the bridge.',
+        'Press Space to advance.',
       ],
       () => {
-        this.buildMatterBridge()
         this.startCorruptedConstructEncounter()
       },
     )
   }
 
-  private buildMatterBridge(): void {
-    if (this.matterBridgeBuilt) {
+  private startCorruptedConstructEncounter(): void {
+    if (this.mini2Defeated || this.constructActive) {
       return
     }
-    this.matterBridgeBuilt = true
-    const bridge: Array<[number, number, number, number, number]> = [
-      [3720, 790, 150, 20, 0x9cd1ff],
-      [3900, 750, 150, 20, 0x9cd1ff],
-      [4080, 710, 150, 20, 0x9cd1ff],
-    ]
-    bridge.forEach(([x, y, w, h, c]) => {
-      const p = this.createStaticPlatform(x, y, w, h, c)
-      p.setAlpha(0)
-      this.tweens.add({ targets: p, alpha: 1, duration: 360 })
-      this.platforms.push(p)
-      this.physics.add.collider(this.player, p)
-      this.physics.add.collider(this.fusionSentinel, p)
-      this.physics.add.collider(this.corruptedConstruct, p)
-      this.physics.add.collider(this.firstCorruption, p)
-    })
-    this.statusMessage = 'The Matter Bridge formed.'
-    this.updateUiText()
-  }
-
-  private startCorruptedConstructEncounter(): void {
+    this.closeArenaGates(3740, 4550)
+    this.arenaState = 'construct_active'
     this.constructActive = true
-    this.constructHp = this.constructMaxHp
-    this.constructHitCount = 0
+    this.corruptedConstructHp = this.constructMaxHp
+    configureCombatant(this.corruptedConstruct, {
+      maxHp: this.constructMaxHp,
+      widthRatio: 0.76,
+      heightRatio: 0.86,
+      resetHp: true,
+    })
     this.lastConstructHitAt = 0
-    this.constructDamageLockUntil = this.time.now + 1100
-    this.corruptedConstruct.enableBody(true, 3520, 780, true, true)
+    this.constructDamageLockUntil = this.time.now + 700
+    this.corruptedConstruct.enableBody(true, 4140, 920, true, true)
+    configureCombatant(this.corruptedConstruct, {
+      maxHp: this.constructMaxHp,
+      widthRatio: 0.76,
+      heightRatio: 0.86,
+      resetHp: false,
+    })
+    this.corruptedConstruct.setData('hp', this.corruptedConstructHp)
+    this.corruptedConstruct.setData('maxHp', this.constructMaxHp)
+    this.corruptedConstruct.setVelocity(0, 0)
+    this.checkpointX = 4000
+    this.checkpointY = 720
     this.startDialogue(
       [
         'Mini-Boss: Corrupted Construct',
         'It uses knockback strikes and summons drones.',
+        'Watch the forge vents. It tears through them on entry.',
         'Press Space to engage.',
       ],
       () => {
-        this.statusMessage = 'Corrupted Construct engaged.'
-        this.updateUiText()
+        this.raiseBossFromForge(this.corruptedConstruct, 4140, 920, 770, 0xdab8ff, 'Corrupted Construct tore up through the floor!')
       },
     )
   }
@@ -1368,31 +1688,118 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     if (this.finalBossActive || this.finalBossDefeated) {
       return
     }
+    this.closeArenaGates(4760, 5160)
+    this.arenaState = 'exomon_active'
     this.finalBossActive = true
     this.finalBossDefeated = false
     this.firstCorruptionHp = this.firstCorruptionMaxHp
-    this.firstCorruptionHitCount = 0
+    configureCombatant(this.firstCorruption, {
+      maxHp: this.firstCorruptionMaxHp,
+      widthRatio: 0.72,
+      heightRatio: 0.86,
+      resetHp: true,
+    })
     this.lastFirstCorruptionHitAt = 0
-    const spawnX = Phaser.Math.Clamp(this.player.x + 210, 4320, 4500)
+    const spawnX = 5000
     this.firstCorruption.setData('dir', -1)
-    this.firstCorruption.enableBody(true, spawnX, 752, true, true)
+    this.firstCorruption.enableBody(true, spawnX, 860, true, true)
+    configureCombatant(this.firstCorruption, {
+      maxHp: this.firstCorruptionMaxHp,
+      widthRatio: 0.72,
+      heightRatio: 0.86,
+      resetHp: false,
+    })
     this.firstCorruption.setVisible(true)
     this.firstCorruption.setActive(true)
     this.firstCorruption.setDepth(40)
-    this.finalBossDamageLockUntil = this.time.now + 1500
+    this.firstCorruption.setVelocity(0, 0)
+    this.finalBossDamageLockUntil = this.time.now + 900
+    this.checkpointX = 4860
+    this.checkpointY = 740
     this.startDialogue(
       [
         'Final Boss: Exomon',
         'Phase 1: shockwaves. Phase 2: beam spreads. Phase 3: absorb cycles.',
+        'The forge core is unstable now. Stay out of the molten metal.',
         'Use Solar Bind to interrupt absorption.',
         'Press Space to begin the final battle.',
       ],
       () => {
-        this.bossLastActionAt = this.time.now - 1200
-        this.statusMessage = 'Exomon engaged.'
-        this.updateUiText()
+        this.raiseBossFromForge(this.firstCorruption, spawnX, 860, 740, 0xffafd6, 'Exomon erupted out of the forge core!')
       },
     )
+  }
+
+  private raiseBossFromForge(
+    enemy: EnemyUnit,
+    x: number,
+    startY: number,
+    targetY: number,
+    tint: number,
+    message: string,
+  ): void {
+    enemy.setActive(true)
+    enemy.setVisible(true)
+    enemy.setPosition(x, startY)
+    enemy.setVelocity(0, 0)
+    enemy.setAlpha(0)
+    this.playForgeBreachEffect(x, 852, tint, Math.max(34, enemy.displayWidth * 0.28))
+    this.cameras.main.shake(170, 0.003)
+    this.tweens.add({
+      targets: enemy,
+      y: targetY,
+      alpha: 1,
+      duration: 420,
+      ease: 'Cubic.out',
+      onComplete: () => {
+        enemy.setAlpha(1)
+        if (enemy === this.firstCorruption) {
+          this.bossLastActionAt = this.time.now - 1200
+          this.firstCorruption.setData('dir', -1)
+        }
+        this.statusMessage = message
+        this.updateUiText()
+      },
+    })
+  }
+
+  private playForgeBreachEffect(x: number, y: number, tint: number, radius: number): void {
+    const vent = this.add.ellipse(x, y + 6, radius * 2.2, radius * 0.75, 0x050203, 0.95)
+    vent.setDepth(14)
+    const glow = this.add.ellipse(x, y + 2, radius * 2.6, radius, tint, 0.3)
+    glow.setDepth(13)
+    const sparks: Phaser.GameObjects.Arc[] = []
+    for (let i = 0; i < 6; i += 1) {
+      const spark = this.add.circle(x + Phaser.Math.Between(-18, 18), y - 4, Phaser.Math.Between(4, 7), 0xffc88a, 0.8)
+      spark.setDepth(15)
+      sparks.push(spark)
+      this.tweens.add({
+        targets: spark,
+        x: spark.x + Phaser.Math.Between(-42, 42),
+        y: spark.y - Phaser.Math.Between(30, 74),
+        alpha: 0,
+        scale: 0.4,
+        duration: 320 + i * 18,
+        onComplete: () => spark.destroy(),
+      })
+    }
+    this.tweens.add({
+      targets: glow,
+      scaleX: 1.25,
+      scaleY: 1.45,
+      alpha: 0,
+      duration: 340,
+      onComplete: () => glow.destroy(),
+    })
+    this.tweens.add({
+      targets: vent,
+      scaleX: 1.18,
+      duration: 230,
+      yoyo: true,
+      onComplete: () => {
+        this.time.delayedCall(380, () => vent.destroy())
+      },
+    })
   }
 
   private damageFusionSentinel(_amount: number): void {
@@ -1407,16 +1814,26 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       return
     }
     this.lastFusionHitAt = now
-    this.fusionHitCount += 1
-    const ratio = Phaser.Math.Clamp(1 - this.fusionHitCount / this.fusionRequiredHits, 0, 1)
-    this.fusionHp = this.fusionMaxHp * ratio
-    if (this.fusionHitCount >= this.fusionRequiredHits) {
+    this.fusionSentinelHp = Math.max(0, this.fusionSentinelHp - _amount)
+    this.fusionSentinel.setData('hp', this.fusionSentinelHp)
+    this.fusionSentinel.setData('maxHp', this.fusionMaxHp)
+    this.fusionSentinel.setTint(0xd8f6ff)
+    this.time.delayedCall(90, () => {
+      if (this.fusionSentinel.active) {
+        this.fusionSentinel.clearTint()
+      }
+    })
+    if (this.fusionSentinelHp <= 0) {
+      this.fusionSentinel.disableBody(true, true)
       this.mini1Defeated = true
       this.fusionActive = false
-      this.fusionSentinel.disableBody(true, true)
+      this.arenaState = 'construct_idle'
+      this.openArenaGates()
       this.statusMessage = 'Fusion Sentinel defeated.'
-      this.updateUiText()
+    } else {
+      this.statusMessage = `Fusion Sentinel HP: ${this.fusionSentinelHp.toFixed(1)}`
     }
+    this.updateUiText()
   }
 
   private damageCorruptedConstruct(_amount: number): void {
@@ -1431,20 +1848,26 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       return
     }
     this.lastConstructHitAt = now
-    this.constructHitCount += 1
-    const ratio = Phaser.Math.Clamp(1 - this.constructHitCount / this.constructRequiredHits, 0, 1)
-    this.constructHp = this.constructMaxHp * ratio
-    if (this.constructHitCount >= this.constructRequiredHits) {
+    this.corruptedConstructHp = Math.max(0, this.corruptedConstructHp - _amount)
+    this.corruptedConstruct.setData('hp', this.corruptedConstructHp)
+    this.corruptedConstruct.setData('maxHp', this.constructMaxHp)
+    this.corruptedConstruct.setTint(0xe0cfff)
+    this.time.delayedCall(90, () => {
+      if (this.corruptedConstruct.active) {
+        this.corruptedConstruct.clearTint()
+      }
+    })
+    if (this.corruptedConstructHp <= 0) {
+      this.corruptedConstruct.disableBody(true, true)
       this.mini2Defeated = true
       this.constructActive = false
-      this.corruptedConstruct.disableBody(true, true)
+      this.arenaState = 'exomon_idle'
+      this.openArenaGates()
       this.statusMessage = 'Corrupted Construct defeated. Final chamber unlocked.'
-      if (!this.finalTriggered) {
-        this.finalTriggered = true
-        this.time.delayedCall(450, () => this.startFinalBossSequence())
-      }
-      this.updateUiText()
+    } else {
+      this.statusMessage = `Corrupted Construct HP: ${this.corruptedConstructHp.toFixed(1)}`
     }
+    this.updateUiText()
   }
 
   private damageFirstCorruption(_amount: number): void {
@@ -1459,12 +1882,17 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       return
     }
     this.lastFirstCorruptionHitAt = now
-    this.firstCorruptionHitCount += 1
-    const ratio = Phaser.Math.Clamp(1 - this.firstCorruptionHitCount / this.firstCorruptionRequiredHits, 0, 1)
-    this.firstCorruptionHp = this.firstCorruptionMaxHp * ratio
-    if (this.firstCorruptionHitCount >= this.firstCorruptionRequiredHits) {
+    const result = applyCombatDamage(this, this.firstCorruption, _amount, 340)
+    if (!result.applied) {
+      return
+    }
+    this.firstCorruptionHp = result.hp
+    if (result.died) {
       this.finalBossDefeated = true
-      this.firstCorruption.disableBody(true, true)
+      this.finalBossActive = false
+      this.finalBossAbsorbActive = false
+      this.arenaState = 'exomon_cleared'
+      this.openArenaGates()
       this.finishStage()
     }
     this.updateUiText()
@@ -1475,8 +1903,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
       return
     }
     this.exitPortalActive = true
+    this.arenaState = 'stage_clear'
     if (this.exitPortal) {
-      this.exitPortal.setPosition(4520, 790)
+      this.exitPortal.setPosition(5060, 748)
       this.exitPortal.setVisible(true)
       this.exitPortal.setStrokeStyle(2, 0xd7f2ff, 0.9)
       this.exitPortal.setFillStyle(0xa7e2ff, 0.6)
@@ -1524,14 +1953,58 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.player.setTint(0xffb7b7)
     this.statusMessage = message
     this.updateUiText()
+    if (forceRespawn) {
+      this.playerHealth = 0
+    }
 
-    if (forceRespawn || this.playerHealth <= 0) {
-      this.playerHealth = this.playerMaxHealth
-      this.player.setPosition(this.checkpointX, this.checkpointY)
-      this.player.setVelocity(0, 0)
-      this.player.setAccelerationX(0)
-      this.statusMessage = 'Respawned at checkpoint.'
-      this.updateUiText()
+    if (this.playerHealth <= 0) {
+      const remainingLives = loseLife()
+      if (remainingLives <= 0) {
+        resetLives()
+        this.playerHealth = this.playerMaxHealth
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = 'GAME OVER! Out of lives.'
+        this.updateUiText()
+        this.physics.pause()
+        const blackout = this.add.rectangle(
+          this.scale.width / 2,
+          this.scale.height / 2,
+          this.scale.width,
+          this.scale.height,
+          0x050103,
+          0.92,
+        )
+        blackout.setDepth(240)
+        blackout.setScrollFactor(0)
+        const text = this.add.text(this.scale.width / 2, this.scale.height / 2 - 18, 'GAME OVER', {
+          color: '#fff1f1',
+          fontFamily: 'sans-serif',
+          fontSize: '72px',
+          align: 'center',
+          fontStyle: 'bold',
+        })
+        text.setOrigin(0.5)
+        text.setDepth(241)
+        text.setScrollFactor(0)
+        const subtext = this.add.text(this.scale.width / 2, this.scale.height / 2 + 46, 'Out of lives', {
+          color: '#ffb3b3',
+          fontFamily: 'sans-serif',
+          fontSize: '28px',
+          align: 'center',
+        })
+        subtext.setOrigin(0.5)
+        subtext.setDepth(241)
+        subtext.setScrollFactor(0)
+        this.time.delayedCall(2200, () => this.scene.start('stage-select'))
+      } else {
+        this.playerHealth = this.playerMaxHealth
+        this.player.setPosition(this.checkpointX, this.checkpointY)
+        this.player.setVelocity(0, 0)
+        this.player.setAccelerationX(0)
+        this.statusMessage = `Lost a life! ${remainingLives} left.`
+        this.updateUiText()
+      }
     }
 
     this.time.delayedCall(this.invulnerabilityMs, () => {
@@ -1604,23 +2077,31 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
-    const fusionState = this.mini1Defeated ? 'Defeated' : this.fusionActive ? `${this.fusionHp.toFixed(1)} HP` : 'Not Engaged'
+    const fusionHp = getCombatHp(this.fusionSentinel)
+    const fusionMaxHp = getCombatMaxHp(this.fusionSentinel)
+    const constructHp = getCombatHp(this.corruptedConstruct)
+    const constructMaxHp = getCombatMaxHp(this.corruptedConstruct)
+    const exomonHp = getCombatHp(this.firstCorruption)
+    const exomonMaxHp = getCombatMaxHp(this.firstCorruption)
+    const fusionState = this.mini1Defeated ? 'Defeated' : this.fusionActive ? `${fusionHp.toFixed(1)}/${fusionMaxHp} HP` : 'Not Engaged'
     const constructState = this.mini2Defeated
       ? 'Defeated'
       : this.constructActive
-        ? `${this.constructHp.toFixed(1)} HP`
+        ? `${constructHp.toFixed(1)}/${constructMaxHp} HP`
         : 'Not Engaged'
     const exomonState = this.finalBossDefeated
       ? 'Defeated'
       : this.finalBossActive
-        ? `${this.firstCorruptionHp.toFixed(1)} HP`
+        ? `${exomonHp.toFixed(1)}/${exomonMaxHp} HP`
         : 'Not Spawned'
     this.uiText.setText(
       [
         'Dungeon Busters',
         'Stage 6: Forge of Origins',
         `Hero: ${this.selectedHero.displayName}`,
+        'Controls: Arrows move/jump | Space shoot | X special | Z punch | C kick',
         `Special (X): ${this.selectedHero.moves.special.name}`,
+        'Tip: Jump on monsters to stomp for bonus damage.',
         `HP: ${hp}`,
         `Fusion Sentinel: ${fusionState}`,
         `Corrupted Construct: ${constructState}`,
@@ -1628,6 +2109,82 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         this.statusMessage,
       ].join('\n'),
     )
+    if (this.livesText) {
+      this.livesText.setText(`Lives ${getLivesDisplay()}`)
+    }
+  }
+
+  private closeArenaGates(leftX: number, rightX: number): void {
+    this.openArenaGates()
+    const makeGate = (x: number) => {
+      const gate = this.add.rectangle(x, 730, 20, 260, 0xffd0d0, 0.18)
+      gate.setStrokeStyle(2, 0xffc4c4, 0.85)
+      gate.setDepth(20)
+      this.physics.add.existing(gate, true)
+      this.physics.add.collider(this.player, gate)
+      this.activeArenaGates.push(gate)
+    }
+    makeGate(leftX)
+    makeGate(rightX)
+  }
+
+  private openArenaGates(): void {
+    for (const gate of this.activeArenaGates) {
+      gate.destroy()
+    }
+    this.activeArenaGates = []
+  }
+
+  private restoreBossForArena(state: Extract<ForgeArenaState, 'fusion_active' | 'construct_active' | 'exomon_active'>): void {
+    if (state === 'fusion_active' && !this.mini1Defeated) {
+      this.fusionActive = true
+      this.fusionSentinel.enableBody(true, 2460, 780, true, true)
+      configureCombatant(this.fusionSentinel, {
+        maxHp: this.fusionMaxHp,
+        widthRatio: 0.82,
+        heightRatio: 0.9,
+        resetHp: false,
+      })
+      this.fusionSentinelHp = Number(this.fusionSentinel.getData('hp') ?? this.fusionSentinelHp ?? this.fusionMaxHp)
+      this.fusionSentinel.setData('hp', this.fusionSentinelHp)
+      this.fusionSentinel.setData('maxHp', this.fusionMaxHp)
+      this.fusionSentinel.setActive(true)
+      this.fusionSentinel.setVisible(true)
+      return
+    }
+    if (state === 'construct_active' && !this.mini2Defeated) {
+      this.constructActive = true
+      this.corruptedConstruct.enableBody(true, 4140, 770, true, true)
+      configureCombatant(this.corruptedConstruct, {
+        maxHp: this.constructMaxHp,
+        widthRatio: 0.76,
+        heightRatio: 0.86,
+        resetHp: false,
+      })
+      this.corruptedConstructHp = Number(this.corruptedConstruct.getData('hp') ?? this.corruptedConstructHp ?? this.constructMaxHp)
+      this.corruptedConstruct.setData('hp', this.corruptedConstructHp)
+      this.corruptedConstruct.setData('maxHp', this.constructMaxHp)
+      this.corruptedConstruct.setActive(true)
+      this.corruptedConstruct.setVisible(true)
+      return
+    }
+    if (state === 'exomon_active' && !this.finalBossDefeated) {
+      this.finalBossActive = true
+      this.firstCorruption.enableBody(true, 5000, 740, true, true)
+      configureCombatant(this.firstCorruption, {
+        maxHp: this.firstCorruptionMaxHp,
+        widthRatio: 0.72,
+        heightRatio: 0.86,
+        resetHp: false,
+      })
+      this.firstCorruption.setActive(true)
+      this.firstCorruption.setVisible(true)
+      this.firstCorruption.setAlpha(1)
+      this.firstCorruption.setDepth(40)
+      this.firstCorruption.setVelocity(0, 0)
+      this.firstCorruption.setData('dir', -1)
+      this.bossLastActionAt = this.time.now - 900
+    }
   }
 
   private drawBar(key: string, x: number, y: number, width: number, current: number, max: number, color: number): void {
@@ -1681,13 +2238,29 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
 
     if (this.fusionActive && this.fusionSentinel.active) {
-      this.drawBar('fusion', this.fusionSentinel.x, this.fusionSentinel.y - 48, 80, this.fusionHp, this.fusionMaxHp, 0x9be8ff)
+      this.drawBar(
+        'fusion',
+        this.fusionSentinel.x,
+        this.fusionSentinel.y - this.fusionSentinel.displayHeight * 0.64,
+        88,
+        getCombatHp(this.fusionSentinel),
+        getCombatMaxHp(this.fusionSentinel),
+        0x9be8ff,
+      )
     } else {
       this.clearBar('fusion')
     }
 
     if (this.constructActive && this.corruptedConstruct.active) {
-      this.drawBar('construct', this.corruptedConstruct.x, this.corruptedConstruct.y - 78, 90, this.constructHp, this.constructMaxHp, 0xc8afff)
+      this.drawBar(
+        'construct',
+        this.corruptedConstruct.x,
+        this.corruptedConstruct.y - this.corruptedConstruct.displayHeight * 0.62,
+        98,
+        getCombatHp(this.corruptedConstruct),
+        getCombatMaxHp(this.corruptedConstruct),
+        0xc8afff,
+      )
     } else {
       this.clearBar('construct')
     }
@@ -1697,9 +2270,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         'first-corruption',
         this.firstCorruption.x,
         this.firstCorruption.y - this.firstCorruption.displayHeight * 0.58,
-        130,
-        this.firstCorruptionHp,
-        this.firstCorruptionMaxHp,
+        150,
+        getCombatHp(this.firstCorruption),
+        getCombatMaxHp(this.firstCorruption),
         0xff9fca,
       )
     } else {
