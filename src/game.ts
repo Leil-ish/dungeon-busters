@@ -752,7 +752,8 @@ class Stage1 extends Phaser.Scene {
     if (!this.isSquatting || !this.hiddenPipe || !this.arePipeGuardsDefeated()) {
       return
     }
-    if (!this.physics.overlap(this.player, this.hiddenPipe)) {
+    const nearPipe = Math.abs(this.player.x - this.hiddenPipeX) <= 70 && Math.abs(this.player.y - (this.hiddenPipeY - 30)) <= 120
+    if (!nearPipe) {
       return
     }
     this.setSecretRoomVisible(true)
