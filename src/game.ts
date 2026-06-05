@@ -86,8 +86,6 @@ class Stage1 extends Phaser.Scene {
   private isSquatting = false
   private normalPlayerDisplayWidth = 40
   private normalPlayerDisplayHeight = 60
-  private normalPlayerBodyWidth = 26
-  private normalPlayerBodyHeight = 54
   private damageReductionMul = 1
   private speedBoostActive = false
 
@@ -218,9 +216,6 @@ class Stage1 extends Phaser.Scene {
     configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
     this.normalPlayerDisplayWidth = this.player.displayWidth
     this.normalPlayerDisplayHeight = this.player.displayHeight
-    const playerBody = this.player.body as Phaser.Physics.Arcade.Body
-    this.normalPlayerBodyWidth = playerBody.width
-    this.normalPlayerBodyHeight = playerBody.height
 
     this.physics.add.collider(this.player, this.staticPlatforms)
 
@@ -417,7 +412,7 @@ class Stage1 extends Phaser.Scene {
     if (this.cursors.up.isDown && body.blocked.down && !this.isSquatting) {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
-    if (body.blocked.down && this.player.y > this.LEVEL_H - 36 && !this.cutsceneActive) {
+    if (!this.isSquatting && body.blocked.down && this.player.y > this.LEVEL_H - 36 && !this.cutsceneActive) {
       this.applyDamage(1, 'You fell between the blocks!', true)
     }
 
@@ -834,21 +829,15 @@ class Stage1 extends Phaser.Scene {
       return
     }
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body
-    const feetY = body.bottom
     this.isSquatting = shouldSquat
 
     if (shouldSquat) {
       this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight * 0.58)
-      body.setSize(this.normalPlayerBodyWidth, this.normalPlayerBodyHeight * 0.58, true)
       this.player.setTint(0xd8f7ff)
     } else {
       this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight)
-      body.setSize(this.normalPlayerBodyWidth, this.normalPlayerBodyHeight, true)
       this.player.clearTint()
     }
-
-    this.player.y += feetY - body.bottom
   }
 
   private updateUiText(): void {
