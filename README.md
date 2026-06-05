@@ -40,6 +40,13 @@ npm run build
 npm run build:pages
 ```
 
+## Deploy
+```bash
+npm run deploy
+```
+
+`npm run deploy` creates the GitHub Pages build locally. Push to `main` to publish through the GitHub Actions workflow.
+
 ## GitHub Pages
 Deployment workflow is included in `.github/workflows/deploy-pages.yml`.
 Push to `main` to deploy.

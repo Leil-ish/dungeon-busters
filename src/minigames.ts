@@ -45,6 +45,13 @@ class ChallengeScene extends Phaser.Scene {
     }
   }
 
+  protected resetChallengeRun(health: number): void {
+    this.health = health
+    this.cleared = false
+    this.failed = false
+    this.physics.resume()
+  }
+
   protected createPixelTexture(key: string, color: number, width: number, height: number): void {
     if (this.textures.exists(key)) {
       return
@@ -145,7 +152,7 @@ export class MeteorDodgeScene extends ChallengeScene {
   }
 
   create(): void {
-    this.health = 3
+    this.resetChallengeRun(3)
     this.partsCollected = 0
     this.secondsLeft = 24
     this.drawHeader('Meteor Dodge House', 'Dodge monster meteors and grab 4 platform cores.', 0xff5757)
@@ -263,7 +270,7 @@ export class FlameRopeBossScene extends ChallengeScene {
   }
 
   create(): void {
-    this.health = 3
+    this.resetChallengeRun(3)
     this.jumpsCleared = 0
     this.ropeActive = false
     this.drawHeader('Flame Rope Boss Castle', 'Jump the giant flaming rope until the fire giant wears out.', 0xff8b3d)
@@ -389,10 +396,18 @@ export class DungeonMinigameScene extends ChallengeScene {
   }
 
   create(): void {
-    this.health = this.definition.kind === 'castle' ? 4 : 3
+    this.resetChallengeRun(this.definition.kind === 'castle' ? 4 : 3)
     this.count = 0
     this.secondsLeft = this.definition.kind === 'castle' ? 30 : 24
     this.goal = this.definition.kind === 'castle' ? 8 : 5
+    this.ropeActive = false
+    this.timingDir = 1
+    this.memorySequence = []
+    this.memoryIndex = 0
+    this.memoryShowing = true
+    this.waterfallWarnings = []
+    this.waterfallHits = []
+    this.waterfallRoundActive = false
     this.drawHeader(this.definition.title, this.definition.subtitle, this.definition.kind === 'castle' ? 0xff8b3d : 0xff5757)
     this.decorateDungeonRoom()
     this.createPixelTexture('dungeon-prize', 0x55c6ff, 24, 24)
