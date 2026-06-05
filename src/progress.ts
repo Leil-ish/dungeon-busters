@@ -19,6 +19,8 @@ export type GameProgress = {
   flameRopeBossCleared: boolean
   clearedMinigames: Record<string, boolean>
   platformParts: number
+  coins: number
+  stage1ShopHealthBought: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -47,6 +49,8 @@ const defaultProgress: GameProgress = {
   flameRopeBossCleared: false,
   clearedMinigames: {},
   platformParts: 0,
+  coins: 0,
+  stage1ShopHealthBought: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
