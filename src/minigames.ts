@@ -46,6 +46,7 @@ class ChallengeScene extends Phaser.Scene {
   }
 
   protected resetChallengeRun(health: number): void {
+    this.time.removeAllEvents()
     this.health = health
     this.cleared = false
     this.failed = false
@@ -264,6 +265,7 @@ export class FlameRopeBossScene extends ChallengeScene {
   private bossText!: Phaser.GameObjects.Text
   private jumpsCleared = 0
   private ropeActive = false
+  private nextRopeLaunchAt = 0
 
   constructor() {
     super('flame-rope-boss')
@@ -273,6 +275,7 @@ export class FlameRopeBossScene extends ChallengeScene {
     this.resetChallengeRun(3)
     this.jumpsCleared = 0
     this.ropeActive = false
+    this.nextRopeLaunchAt = 0
     this.drawHeader('Flame Rope Boss Castle', 'Jump the giant flaming rope until the fire giant wears out.', 0xff8b3d)
     this.createPixelTexture('rope-player', 0xffd166, 34, 48)
     this.createPixelTexture('flame-rope', 0xff6536, 124, 16)
@@ -302,7 +305,7 @@ export class FlameRopeBossScene extends ChallengeScene {
     this.bossText = this.add.text(34, 112, '', { ...TEXT_STYLE, fontSize: '18px' })
     this.statusText.setText('Jump with Up or Space. Clear 8 rope swings.')
     this.refreshHud()
-    this.time.delayedCall(700, () => this.launchRope())
+    this.nextRopeLaunchAt = this.time.now + 700
   }
 
   update(): void {
@@ -313,6 +316,10 @@ export class FlameRopeBossScene extends ChallengeScene {
     const body = this.player.body as Phaser.Physics.Arcade.Body
     if ((Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.cursors.up.isDown) && body.blocked.down) {
       this.player.setVelocityY(-520)
+    }
+
+    if (!this.ropeActive && this.jumpsCleared < 8 && this.time.now >= this.nextRopeLaunchAt) {
+      this.launchRope()
     }
 
     if (this.ropeActive && this.rope.x < -80) {
@@ -327,7 +334,7 @@ export class FlameRopeBossScene extends ChallengeScene {
           gameProgress.platformParts = Math.max(gameProgress.platformParts, 7)
         })
       } else {
-        this.time.delayedCall(Math.max(360, 900 - this.jumpsCleared * 55), () => this.launchRope())
+        this.nextRopeLaunchAt = this.time.now + Math.max(360, 900 - this.jumpsCleared * 55)
       }
     }
   }
@@ -337,6 +344,7 @@ export class FlameRopeBossScene extends ChallengeScene {
       return
     }
     this.ropeActive = true
+    this.nextRopeLaunchAt = Number.POSITIVE_INFINITY
     this.rope.enableBody(true, 1040, 426, true, true)
     this.rope.setVelocityX(-360 - this.jumpsCleared * 24)
   }
@@ -356,6 +364,7 @@ export class DungeonMinigameScene extends ChallengeScene {
   private secondsLeft = 24
   private rope!: Phaser.Physics.Arcade.Image
   private ropeActive = false
+  private nextRopeLaunchAt = 0
   private timingCursor!: Phaser.GameObjects.Rectangle
   private timingZone!: Phaser.GameObjects.Rectangle
   private timingDir = 1
@@ -401,6 +410,7 @@ export class DungeonMinigameScene extends ChallengeScene {
     this.secondsLeft = this.definition.kind === 'castle' ? 30 : 24
     this.goal = this.definition.kind === 'castle' ? 8 : 5
     this.ropeActive = false
+    this.nextRopeLaunchAt = 0
     this.timingDir = 1
     this.memorySequence = []
     this.memoryIndex = 0
@@ -614,7 +624,7 @@ export class DungeonMinigameScene extends ChallengeScene {
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
     this.statusText.setText(this.definition.stageKey === 'laser-alley' ? 'Jump with Up or Space. Clear every laser rope.' : 'Jump with Up or Space. Clear every rope swing.')
-    this.time.delayedCall(700, () => this.launchRope())
+    this.nextRopeLaunchAt = this.time.now + 700
   }
 
   private createWaterfallRushChallenge(): void {
@@ -835,6 +845,9 @@ export class DungeonMinigameScene extends ChallengeScene {
     if ((Phaser.Input.Keyboard.JustDown(this.spaceKey) || this.cursors.up.isDown) && body.blocked.down) {
       this.player.setVelocityY(-520)
     }
+    if (!this.ropeActive && this.count < this.goal && this.time.now >= this.nextRopeLaunchAt) {
+      this.launchRope()
+    }
     if (this.ropeActive && this.rope.x < -80) {
       this.ropeActive = false
       this.rope.disableBody(true, true)
@@ -844,7 +857,7 @@ export class DungeonMinigameScene extends ChallengeScene {
       if (this.count >= this.goal) {
         this.clearChallenge()
       } else {
-        this.time.delayedCall(Math.max(320, 880 - this.count * 55), () => this.launchRope())
+        this.nextRopeLaunchAt = this.time.now + Math.max(320, 880 - this.count * 55)
       }
     }
   }
@@ -872,6 +885,7 @@ export class DungeonMinigameScene extends ChallengeScene {
   private launchRope(): void {
     if (this.cleared || this.failed) return
     this.ropeActive = true
+    this.nextRopeLaunchAt = Number.POSITIVE_INFINITY
     this.rope.enableBody(true, 1040, 426, true, true)
     this.rope.setVelocityX(-360 - this.count * 24)
   }
