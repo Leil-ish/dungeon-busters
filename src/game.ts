@@ -21,12 +21,20 @@ import { ForgeOfOriginsScene } from './forge-of-origins'
 import { DungeonMinigameScene, MeteorDodgeScene } from './minigames'
 import { addMinigameEntrances } from './minigame-entrances'
 
+type PipeGuard = {
+  sprite: Phaser.Physics.Arcade.Sprite
+  minX: number
+  maxX: number
+  speed: number
+}
+
 class Stage1 extends Phaser.Scene {
   private readonly LEVEL_W = 2400
   private readonly LEVEL_H = 900
   private player!: Phaser.Physics.Arcade.Sprite
   private enemy!: Phaser.Physics.Arcade.Sprite
   private enemy2!: Phaser.Physics.Arcade.Sprite
+  private pipeGuards: PipeGuard[] = []
   private shots!: Phaser.Physics.Arcade.Group
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private slipperyZones: Phaser.Geom.Rectangle[] = []
@@ -68,6 +76,18 @@ class Stage1 extends Phaser.Scene {
   private checkpointY = 680
   private healthPickup: Phaser.GameObjects.Rectangle | null = null
   private powerPickup: Phaser.GameObjects.Rectangle | null = null
+  private hiddenPipe: Phaser.GameObjects.Rectangle | null = null
+  private hiddenPipeTop: Phaser.GameObjects.Rectangle | null = null
+  private secretExitPipe: Phaser.GameObjects.Rectangle | null = null
+  private coinPickups: Phaser.GameObjects.Arc[] = []
+  private secretRoomObjects: Phaser.GameObjects.GameObject[] = []
+  private shopZone!: Phaser.GameObjects.Zone
+  private shopText!: Phaser.GameObjects.Text
+  private isSquatting = false
+  private normalPlayerDisplayWidth = 40
+  private normalPlayerDisplayHeight = 60
+  private normalPlayerBodyWidth = 26
+  private normalPlayerBodyHeight = 54
   private damageReductionMul = 1
   private speedBoostActive = false
 
@@ -84,6 +104,10 @@ class Stage1 extends Phaser.Scene {
   private readonly enemy2PatrolMinX = 2270
   private readonly enemy2PatrolMaxX = 2370
   private readonly enemy2PatrolSpeed = 52
+  private readonly hiddenPipeX = 1320
+  private readonly hiddenPipeY = 824
+  private readonly secretRoomX = 420
+  private readonly secretRoomY = 260
   private readonly hitInvulnerabilityMs = 1350
   private readonly shotCooldownMs = 220
   private readonly shotSpeed = 520
@@ -192,6 +216,11 @@ class Stage1 extends Phaser.Scene {
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
     configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
+    this.normalPlayerDisplayWidth = this.player.displayWidth
+    this.normalPlayerDisplayHeight = this.player.displayHeight
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body
+    this.normalPlayerBodyWidth = playerBody.width
+    this.normalPlayerBodyHeight = playerBody.height
 
     this.physics.add.collider(this.player, this.staticPlatforms)
 
@@ -213,6 +242,7 @@ class Stage1 extends Phaser.Scene {
     this.enemy2.setVelocityX(-this.enemy2PatrolSpeed)
     this.physics.add.collider(this.enemy2, this.staticPlatforms)
     this.physics.add.overlap(this.player, this.enemy2, () => this.handleEnemyHit(this.enemy2))
+    this.createPipeGuards(enemyTexture)
 
     this.shots = this.physics.add.group({
       allowGravity: false,
@@ -241,6 +271,11 @@ class Stage1 extends Phaser.Scene {
     this.physics.add.overlap(this.shots, this.enemy2, (shotObj, enemyObj) => {
       this.handleEnemyShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
     })
+    for (const guard of this.pipeGuards) {
+      this.physics.add.overlap(this.shots, guard.sprite, (shotObj, enemyObj) => {
+        this.handleEnemyShot(shotObj as Phaser.Physics.Arcade.Image, enemyObj as Phaser.Physics.Arcade.Sprite)
+      })
+    }
 
     this.slipperyZones = [
       this.createSlipperyZone(520, worldHeight - 170, 260, 180),
@@ -257,6 +292,7 @@ class Stage1 extends Phaser.Scene {
     this.physics.add.existing(this.exitDoor, true)
     this.createCheckpointsAndItems()
     this.createMinigameEntrances()
+    this.createPipeSecret()
 
     this.physics.add.overlap(this.player, this.keyPiece, () => {
       if (!this.keyPiece || this.playerHasKey) {
@@ -336,26 +372,35 @@ class Stage1 extends Phaser.Scene {
       return
     }
 
+    const body = this.player.body as Phaser.Physics.Arcade.Body
+    const wantsSquat = this.cursors.down.isDown && body.blocked.down
+    this.setPlayerSquatting(wantsSquat)
+    this.updateShopPrompt()
+    this.tryUseHiddenPipe()
+    this.tryUseSecretExitPipe()
+
     const isInSlipperyZone = this.slipperyZones.some((zone) =>
       Phaser.Geom.Rectangle.Contains(zone, this.player.x, this.player.y),
     )
+    const squatSpeedMul = this.isSquatting ? 0.45 : 1
 
     if (isInSlipperyZone) {
       this.player.setDragX(this.slipperyDragX)
       this.player.setMaxVelocity(
-        this.effectiveStats.maxVelocityX * (this.slipperyMaxVelocityX / this.normalMaxVelocityX) + (this.speedBoostActive ? 80 : 0),
+        (this.effectiveStats.maxVelocityX * (this.slipperyMaxVelocityX / this.normalMaxVelocityX) + (this.speedBoostActive ? 80 : 0)) *
+          squatSpeedMul,
         900,
       )
     } else {
       this.player.setDragX(this.normalDragX)
-      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + (this.speedBoostActive ? 80 : 0), 900)
+      this.player.setMaxVelocity((this.effectiveStats.maxVelocityX + (this.speedBoostActive ? 80 : 0)) * squatSpeedMul, 900)
     }
 
     if (this.cursors.left.isDown) {
-      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = -1
     } else if (this.cursors.right.isDown) {
-      this.player.setAccelerationX(this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = 1
     } else {
       this.player.setAccelerationX(0)
@@ -369,8 +414,7 @@ class Stage1 extends Phaser.Scene {
       this.tryUseHeroAbility()
     }
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body
-    if (this.cursors.up.isDown && body.blocked.down) {
+    if (this.cursors.up.isDown && body.blocked.down && !this.isSquatting) {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
     if (body.blocked.down && this.player.y > this.LEVEL_H - 36 && !this.cutsceneActive) {
@@ -404,6 +448,8 @@ class Stage1 extends Phaser.Scene {
         this.enemy2.setVelocityX(-this.enemy2PatrolSpeed)
       }
     }
+
+    this.updatePipeGuards()
   }
 
   private createSlipperyZone(
@@ -459,6 +505,281 @@ class Stage1 extends Phaser.Scene {
     })
   }
 
+  private createPipeGuards(enemyTexture: string): void {
+    const guardDefs: Array<[number, number, number, number, number]> = [
+      [1210, 698, 1140, 1285, 76],
+      [1425, 698, 1360, 1495, 68],
+      [1535, 698, 1480, 1600, 64],
+    ]
+
+    this.pipeGuards = guardDefs.map(([x, y, minX, maxX, speed]) => {
+      const sprite = this.physics.add.sprite(x, y, enemyTexture)
+      sprite.setCollideWorldBounds(true)
+      sprite.setImmovable(true)
+      ;(sprite.body as Phaser.Physics.Arcade.Body).setAllowGravity(false)
+      configureCombatant(sprite, { maxHp: 6, widthRatio: 0.72, heightRatio: 0.8 })
+      sprite.setTint(0x8cffaa)
+      sprite.setVelocityX(speed)
+      this.physics.add.collider(sprite, this.staticPlatforms)
+      this.physics.add.overlap(this.player, sprite, () => this.handleEnemyHit(sprite))
+      return { sprite, minX, maxX, speed }
+    })
+  }
+
+  private createPipeSecret(): void {
+    const pipeBase = this.add.rectangle(this.hiddenPipeX, this.hiddenPipeY, 54, 58, 0x21b45b, 0.08)
+    const pipeTop = this.add.rectangle(this.hiddenPipeX, this.hiddenPipeY - 34, 78, 22, 0x39e57b, 0.08)
+    this.hiddenPipe = pipeBase
+    this.hiddenPipeTop = pipeTop
+    this.physics.add.existing(pipeBase, true)
+    this.physics.add.existing(pipeTop, true)
+    this.add.text(this.hiddenPipeX, this.hiddenPipeY + 42, 'Hidden Pipe', {
+      color: '#bfffd3',
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      backgroundColor: '#071024aa',
+      padding: { x: 5, y: 2 },
+    }).setOrigin(0.5).setAlpha(0.12)
+
+    const secretPlatforms = [
+      this.createStaticPlatform(this.secretRoomX, this.secretRoomY + 170, 520, 26, 0x284a5d),
+      this.createStaticPlatform(this.secretRoomX - 250, this.secretRoomY + 70, 28, 220, 0x1d3345),
+      this.createStaticPlatform(this.secretRoomX + 250, this.secretRoomY + 70, 28, 220, 0x1d3345),
+      this.createStaticPlatform(this.secretRoomX, this.secretRoomY - 44, 520, 26, 0x1d3345),
+    ]
+    this.secretRoomObjects.push(...secretPlatforms)
+    this.physics.add.collider(this.player, secretPlatforms)
+
+    this.secretRoomObjects.push(this.add.rectangle(this.secretRoomX, this.secretRoomY + 64, 500, 210, 0x071024, 0.72))
+    this.secretRoomObjects.push(this.add.text(this.secretRoomX - 218, this.secretRoomY - 18, 'Secret Pipe Room', {
+      color: '#fff4d1',
+      fontFamily: 'sans-serif',
+      fontSize: '18px',
+      backgroundColor: '#071024aa',
+      padding: { x: 6, y: 3 },
+    }))
+
+    const exitBase = this.add.rectangle(this.secretRoomX - 196, this.secretRoomY + 132, 52, 58, 0x21b45b, 0.95)
+    const exitTop = this.add.rectangle(this.secretRoomX - 196, this.secretRoomY + 98, 76, 22, 0x39e57b, 0.95)
+    this.secretExitPipe = exitBase
+    this.secretRoomObjects.push(exitBase, exitTop)
+    this.physics.add.existing(exitBase, true)
+    this.physics.add.existing(exitTop, true)
+    const exitLabel = this.add.text(this.secretRoomX - 196, this.secretRoomY + 174, 'Squat to exit', {
+      color: '#bfffd3',
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      backgroundColor: '#071024cc',
+      padding: { x: 5, y: 2 },
+    }).setOrigin(0.5)
+    this.secretRoomObjects.push(exitLabel)
+
+    this.createSecretCoins()
+    this.createSecretShop()
+    this.setSecretRoomVisible(false)
+  }
+
+  private createSecretCoins(): void {
+    if (gameProgress.stage1PipeCoinsCollected) {
+      return
+    }
+
+    const coinPositions: Array<[number, number]> = [
+      [this.secretRoomX - 90, this.secretRoomY + 84],
+      [this.secretRoomX - 42, this.secretRoomY + 62],
+      [this.secretRoomX + 8, this.secretRoomY + 84],
+      [this.secretRoomX + 58, this.secretRoomY + 62],
+      [this.secretRoomX + 108, this.secretRoomY + 84],
+      [this.secretRoomX + 158, this.secretRoomY + 62],
+    ]
+
+    this.coinPickups = coinPositions.map(([x, y]) => {
+      const coin = this.add.circle(x, y, 11, 0xffd84f, 1)
+      coin.setStrokeStyle(2, 0xfff0a8, 1)
+      this.secretRoomObjects.push(coin)
+      this.physics.add.existing(coin, true)
+      this.physics.add.overlap(this.player, coin, () => this.collectSecretCoin(coin))
+      return coin
+    })
+  }
+
+  private createSecretShop(): void {
+    const shopX = this.secretRoomX + 184
+    const shopY = this.secretRoomY + 122
+    const shopBody = this.add.rectangle(shopX, shopY, 96, 84, 0x4b2b68, 0.96)
+    const shopSign = this.add.rectangle(shopX, shopY - 52, 118, 24, 0xffd166, 0.95)
+    const shopTitle = this.add.text(shopX, shopY - 60, 'ITEM SHOP', {
+      color: '#231528',
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      fontStyle: 'bold',
+      fixedWidth: 118,
+      align: 'center',
+    }).setOrigin(0.5, 0)
+    this.secretRoomObjects.push(shopBody, shopSign, shopTitle)
+    this.shopText = this.add.text(shopX - 78, shopY - 30, '', {
+      color: '#f6f8ff',
+      fontFamily: 'sans-serif',
+      fontSize: '12px',
+      lineSpacing: 4,
+      backgroundColor: '#071024cc',
+      padding: { x: 6, y: 4 },
+      fixedWidth: 156,
+    })
+    this.secretRoomObjects.push(this.shopText)
+    this.shopZone = this.add.zone(shopX, shopY, 150, 112)
+    this.physics.add.existing(this.shopZone, true)
+    this.refreshShopText()
+  }
+
+  private collectSecretCoin(coin: Phaser.GameObjects.Arc): void {
+    if (!coin.active) {
+      return
+    }
+    coin.destroy()
+    this.coinPickups = this.coinPickups.filter((pickup) => pickup !== coin)
+    gameProgress.coins += 1
+    if (this.coinPickups.length === 0) {
+      gameProgress.stage1PipeCoinsCollected = true
+    }
+    saveGameProgress()
+    this.statusMessage = `Coin found! Coins: ${gameProgress.coins}`
+    this.playTone(780, 0.06)
+    this.refreshShopText()
+    this.updateUiText()
+  }
+
+  private refreshShopText(): void {
+    if (!this.shopText) {
+      return
+    }
+    const healthStatus = gameProgress.stage1ShopHealthBought ? 'sold' : '1 coin'
+    const powerStatus = gameProgress.stage1ShopPowerBought ? 'sold' : '2 coins'
+    const lifeStatus = gameProgress.stage1ShopLifeBought ? 'sold' : '3 coins'
+    this.shopText.setText(`Coins: ${gameProgress.coins}\n1. Snack Pack: ${healthStatus}\n2. Power Fizzy: ${powerStatus}\n3. Bonus Life: ${lifeStatus}\nSpace buys next`)
+  }
+
+  private setSecretRoomVisible(visible: boolean): void {
+    for (const obj of this.secretRoomObjects) {
+      ;(obj as Phaser.GameObjects.GameObject & { setVisible?: (value: boolean) => void }).setVisible?.(visible)
+      const body = (obj as Phaser.GameObjects.GameObject & { body?: { enable: boolean } }).body
+      if (body) {
+        body.enable = visible
+      }
+    }
+    const shopBody = (this.shopZone as Phaser.GameObjects.Zone & { body?: { enable: boolean } }).body
+    if (shopBody) {
+      shopBody.enable = visible
+    }
+  }
+
+  private updateShopPrompt(): void {
+    if (!this.shopZone || !this.physics.overlap(this.player, this.shopZone)) {
+      return
+    }
+    this.statusMessage = 'Secret shop: press Space to buy a cheap item.'
+    this.refreshShopText()
+    this.updateUiText()
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.buyNextShopItem()
+      this.lastShotAt = this.time.now
+    }
+  }
+
+  private buyNextShopItem(): void {
+    if (!gameProgress.stage1ShopHealthBought && gameProgress.coins >= 1) {
+      gameProgress.coins -= 1
+      gameProgress.stage1ShopHealthBought = true
+      this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 4)
+      this.statusMessage = 'Bought Snack Pack. Big heal!'
+      this.finishShopPurchase()
+      return
+    }
+
+    if (!gameProgress.stage1ShopPowerBought && gameProgress.coins >= 2) {
+      gameProgress.coins -= 2
+      gameProgress.stage1ShopPowerBought = true
+      this.shotCooldownScale = Math.min(this.shotCooldownScale, 0.75)
+      this.abilityCooldownScale = Math.min(this.abilityCooldownScale, 0.75)
+      this.abilityPowerScale = Math.max(this.abilityPowerScale, 1.45)
+      this.statusMessage = 'Bought Power Fizzy. Shots and specials boosted!'
+      this.finishShopPurchase()
+      return
+    }
+
+    if (!gameProgress.stage1ShopLifeBought && gameProgress.coins >= 3) {
+      gameProgress.coins -= 3
+      gameProgress.stage1ShopLifeBought = true
+      gameProgress.remainingLives = Math.min(5, gameProgress.remainingLives + 1)
+      this.statusMessage = 'Bought Bonus Life. Extra safety!'
+      this.finishShopPurchase()
+      return
+    }
+
+    this.statusMessage = 'Need more coins, or the shop is sold out.'
+    this.playTone(180, 0.08)
+    this.updateUiText()
+  }
+
+  private finishShopPurchase(): void {
+    saveGameProgress()
+    this.refreshShopText()
+    this.playTone(920, 0.09)
+    this.updateUiText()
+  }
+
+  private updatePipeGuards(): void {
+    for (const guard of this.pipeGuards) {
+      if (!guard.sprite.active) {
+        continue
+      }
+      if (guard.sprite.x <= guard.minX) {
+        guard.sprite.setVelocityX(guard.speed)
+      } else if (guard.sprite.x >= guard.maxX) {
+        guard.sprite.setVelocityX(-guard.speed)
+      }
+    }
+
+    if (this.arePipeGuardsDefeated() && this.hiddenPipe && this.hiddenPipe.alpha < 0.9) {
+      this.hiddenPipe.setAlpha(0.95)
+      this.hiddenPipeTop?.setAlpha(0.95)
+      this.statusMessage = 'Secret pipe revealed! Squat on it to enter.'
+      this.playTone(680, 0.12)
+      this.updateUiText()
+    }
+  }
+
+  private arePipeGuardsDefeated(): boolean {
+    return this.pipeGuards.length > 0 && this.pipeGuards.every((guard) => !guard.sprite.active)
+  }
+
+  private tryUseHiddenPipe(): void {
+    if (!this.isSquatting || !this.hiddenPipe || !this.arePipeGuardsDefeated()) {
+      return
+    }
+    if (!this.physics.overlap(this.player, this.hiddenPipe)) {
+      return
+    }
+    this.setSecretRoomVisible(true)
+    this.player.setPosition(this.secretRoomX - 196, this.secretRoomY + 72)
+    this.player.setVelocity(0, 0)
+    this.statusMessage = 'You squatted into the secret pipe room!'
+    this.playTone(520, 0.12)
+    this.updateUiText()
+  }
+
+  private tryUseSecretExitPipe(): void {
+    if (!this.isSquatting || !this.secretExitPipe || !this.physics.overlap(this.player, this.secretExitPipe)) {
+      return
+    }
+    this.setSecretRoomVisible(false)
+    this.player.setPosition(this.hiddenPipeX + 86, this.hiddenPipeY - 64)
+    this.player.setVelocity(0, 0)
+    this.statusMessage = 'Back from the pipe room.'
+    this.playTone(420, 0.1)
+    this.updateUiText()
+  }
+
   private createMinigameEntrances(): void {
     addMinigameEntrances(this, {
       stageKey: 'stage1',
@@ -508,10 +829,32 @@ class Stage1 extends Phaser.Scene {
     return platform
   }
 
+  private setPlayerSquatting(shouldSquat: boolean): void {
+    if (this.isSquatting === shouldSquat) {
+      return
+    }
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body
+    const feetY = body.bottom
+    this.isSquatting = shouldSquat
+
+    if (shouldSquat) {
+      this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight * 0.58)
+      body.setSize(this.normalPlayerBodyWidth, this.normalPlayerBodyHeight * 0.58, true)
+      this.player.setTint(0xd8f7ff)
+    } else {
+      this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight)
+      body.setSize(this.normalPlayerBodyWidth, this.normalPlayerBodyHeight, true)
+      this.player.clearTint()
+    }
+
+    this.player.y += feetY - body.bottom
+  }
+
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
-      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nSpecial (X): ${this.selectedHero.moves.special.name}\nHP: ${hp}\nPlatform Parts: ${gameProgress.platformParts}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
+      `Dungeon Busters\n${this.stageName}\nHero: ${this.heroName}\nSpecial (X): ${this.selectedHero.moves.special.name}\nHP: ${hp}\nCoins: ${gameProgress.coins}\nPlatform Parts: ${gameProgress.platformParts}\nTorrent Key Piece: ${this.playerHasKey ? 'Yes' : 'No'}\n${this.statusMessage}`,
     )
     if (this.livesText) {
       this.livesText.setText(`Lives ${getLivesDisplay()}`)
@@ -651,11 +994,15 @@ class Stage1 extends Phaser.Scene {
     }
     if (result.died) {
       enemy.disableBody(true, true)
-      this.statusMessage = 'Enemy down!'
+      this.statusMessage = this.arePipeGuardsDefeated() ? 'Pipe guards defeated. A secret pipe appeared!' : 'Enemy down!'
     } else {
       this.statusMessage = `Enemy HP: ${result.hp}`
     }
     this.updateUiText()
+  }
+
+  private getStageEnemies(): Phaser.Physics.Arcade.Sprite[] {
+    return [this.enemy, this.enemy2, ...this.pipeGuards.map((guard) => guard.sprite)]
   }
 
   private get heroName(): string {
@@ -669,7 +1016,7 @@ class Stage1 extends Phaser.Scene {
     }
 
     this.lastAbilityAt = now
-    const enemies = [this.enemy, this.enemy2]
+    const enemies = this.getStageEnemies()
     const power = this.abilityPowerScale
     const impactRadiusX = 170 + power * 40
     const impactRadiusY = 120 + power * 24
@@ -809,7 +1156,7 @@ class Stage1 extends Phaser.Scene {
           delay: 90,
           repeat: 24,
           callback: () => {
-            for (const enemy of [this.enemy, this.enemy2]) {
+            for (const enemy of this.getStageEnemies()) {
               const body = enemy.body as Phaser.Physics.Arcade.Body | null
               if (enemy.active && body && Phaser.Geom.Rectangle.Contains(patchRect, enemy.x, enemy.y)) {
                 enemy.setVelocityX(body.velocity.x * 0.65)

@@ -21,6 +21,9 @@ export type GameProgress = {
   platformParts: number
   coins: number
   stage1ShopHealthBought: boolean
+  stage1ShopPowerBought: boolean
+  stage1ShopLifeBought: boolean
+  stage1PipeCoinsCollected: boolean
   selectedHeroId: HeroId
   pendingStageId: StageId | null
   pendingStageSceneKey: string | null
@@ -51,6 +54,9 @@ const defaultProgress: GameProgress = {
   platformParts: 0,
   coins: 0,
   stage1ShopHealthBought: false,
+  stage1ShopPowerBought: false,
+  stage1ShopLifeBought: false,
+  stage1PipeCoinsCollected: false,
   selectedHeroId: 'MICRALIS',
   pendingStageId: null,
   pendingStageSceneKey: null,
