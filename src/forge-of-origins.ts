@@ -10,6 +10,7 @@ import {
 import { gameProgress, getLivesDisplay, loseLife, resetLives, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 import { addMinigameEntrances } from './minigame-entrances'
+import { PipeShop } from './pipe-shops'
 
 type TimedLaser = {
   rect: Phaser.GameObjects.Rectangle
@@ -98,6 +99,10 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
   private uiText!: Phaser.GameObjects.Text
   private livesText!: Phaser.GameObjects.Text
+  private pipeShop!: PipeShop
+  private isSquatting = false
+  private normalPlayerDisplayWidth = 40
+  private normalPlayerDisplayHeight = 60
   private exitPortal: Phaser.GameObjects.Rectangle | null = null
   private exitPortalActive = false
   private lastPortalPromptAt = 0
@@ -191,6 +196,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         this.updateUiText()
       },
     })
+    this.createPipeShop()
     this.createExitPortal()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
@@ -260,7 +266,9 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
 
     this.updatePlayerMovement()
     this.updateChromaforgeCrash()
-    this.handleCombatInputs()
+    const actionPressed = Phaser.Input.Keyboard.JustDown(this.fireKey)
+    const shopBought = this.pipeShop.update(this.isSquatting, actionPressed)
+    this.handleCombatInputs(shopBought, actionPressed)
 
     this.updateCommonEnemies()
     this.updateMiniBosses()
@@ -335,6 +343,47 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
 
     gfx.destroy()
+  }
+
+  private createPipeShop(): void {
+    this.pipeShop = new PipeShop(this, {
+      stageKey: 'forge-of-origins',
+      roomTitle: 'Forge Pipe Room',
+      player: this.player,
+      pipeX: 2420,
+      pipeY: 824,
+      roomX: 600,
+      roomY: 260,
+      unlockMessage: 'The Fusion Sentinel uncovered a hidden pipe!',
+      returnMessage: 'Back from the forge pipe room.',
+      isUnlocked: () => this.mini1Defeated,
+      setStatus: (message) => {
+        this.statusMessage = message
+      },
+      updateUi: () => this.updateUiText(),
+      heal: () => {
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + 2)
+      },
+      boostPower: () => {
+        this.abilityPowerScale = Math.max(this.abilityPowerScale, 1.35)
+        this.statusMessage = 'Power Fizzy superheated your special!'
+      },
+      boostSpeed: () => {
+        this.effectiveStats = {
+          ...this.effectiveStats,
+          moveAcceleration: this.effectiveStats.moveAcceleration + 95,
+          maxVelocityX: this.effectiveStats.maxVelocityX + 45,
+        }
+      },
+      boostDefense: () => {
+        this.damageReductionMul = Math.min(this.damageReductionMul, 0.72)
+      },
+      addLife: () => {
+        gameProgress.remainingLives = Math.min(5, gameProgress.remainingLives + 1)
+        saveGameProgress()
+      },
+      playTone: (freq, durationSec) => this.playTone(freq, durationSec),
+    })
   }
 
   private createBackdrop(): void {
@@ -444,6 +493,8 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 980)
     configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
+    this.normalPlayerDisplayWidth = this.player.displayWidth
+    this.normalPlayerDisplayHeight = this.player.displayHeight
     this.physics.add.collider(this.player, this.platforms)
 
     const spawnEnemy = (x: number, y: number, minX: number, maxX: number): EnemyUnit => {
@@ -628,27 +679,29 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
   }
 
   private updatePlayerMovement(): void {
+    const body = this.player.body as Phaser.Physics.Arcade.Body
+    this.setPlayerSquatting(this.cursors.down.isDown && body.blocked.down)
+    const squatSpeedMul = this.isSquatting ? 0.45 : 1
     const inSlippery = this.slipperyZones.some((zone) => Phaser.Geom.Rectangle.Contains(zone, this.player.x, this.player.y))
     if (inSlippery) {
       this.player.setDragX(this.slipperyDragX)
-      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX + 70, 980)
+      this.player.setMaxVelocity((this.effectiveStats.maxVelocityX + 70) * squatSpeedMul, 980)
     } else {
       this.player.setDragX(this.normalDragX)
-      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 980)
+      this.player.setMaxVelocity(this.effectiveStats.maxVelocityX * squatSpeedMul, 980)
     }
 
     if (this.cursors.left.isDown) {
-      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = -1
     } else if (this.cursors.right.isDown) {
-      this.player.setAccelerationX(this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = 1
     } else {
       this.player.setAccelerationX(0)
     }
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body
-    if (this.cursors.up.isDown && body.blocked.down) {
+    if (this.cursors.up.isDown && body.blocked.down && !this.isSquatting) {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
 
@@ -657,8 +710,8 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     }
   }
 
-  private handleCombatInputs(): void {
-    if (Phaser.Input.Keyboard.JustDown(this.fireKey)) {
+  private handleCombatInputs(shopBought: boolean, actionPressed: boolean): void {
+    if (!shopBought && actionPressed) {
       this.firePlayerShot()
     }
     if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
@@ -2075,6 +2128,22 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
     this.cutsceneText.setText(this.cutsceneLines[this.cutsceneIndex])
   }
 
+  private setPlayerSquatting(isSquatting: boolean): void {
+    if (this.isSquatting === isSquatting) {
+      return
+    }
+
+    this.isSquatting = isSquatting
+    if (isSquatting) {
+      this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight * 0.62)
+      this.player.setTint(0xe7fbff)
+      return
+    }
+
+    this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight)
+    this.player.clearTint()
+  }
+
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     const fusionHp = getCombatHp(this.fusionSentinel)
@@ -2103,6 +2172,7 @@ export class ForgeOfOriginsScene extends Phaser.Scene {
         `Special (X): ${this.selectedHero.moves.special.name}`,
         'Tip: Jump on monsters to stomp for bonus damage.',
         `HP: ${hp}`,
+        `Coins: ${gameProgress.coins}`,
         `Fusion Sentinel: ${fusionState}`,
         `Corrupted Construct: ${constructState}`,
         `Exomon: ${exomonState}`,

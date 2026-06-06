@@ -10,6 +10,7 @@ import {
 import { gameProgress, getLivesDisplay, loseLife, resetLives, saveGameProgress } from './progress'
 import { preloadSpriteAssets } from './sprite-assets'
 import { addMinigameEntrances } from './minigame-entrances'
+import { PipeShop } from './pipe-shops'
 
 type RockSpawnPoint = {
   x: number
@@ -92,6 +93,10 @@ export class RockyCavernsScene extends Phaser.Scene {
   private checkpointY = 690
   private healthPickup: Phaser.GameObjects.Rectangle | null = null
   private powerPickup: Phaser.GameObjects.Rectangle | null = null
+  private pipeShop!: PipeShop
+  private isSquatting = false
+  private normalPlayerDisplayWidth = 40
+  private normalPlayerDisplayHeight = 60
   private damageReductionMul = 1
   private speedBoostActive = false
 
@@ -154,6 +159,8 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.player.setDragX(this.normalDragX)
     this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
     configureCombatant(this.player, { maxHp: this.playerMaxHealth, widthRatio: 0.66, heightRatio: 0.9 })
+    this.normalPlayerDisplayWidth = this.player.displayWidth
+    this.normalPlayerDisplayHeight = this.player.displayHeight
     this.physics.add.collider(this.player, this.staticPlatforms)
 
     this.createEnemiesAndWeaponSystem()
@@ -169,6 +176,7 @@ export class RockyCavernsScene extends Phaser.Scene {
         this.updateUiText()
       },
     })
+    this.createPipeShop()
 
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
@@ -233,25 +241,30 @@ export class RockyCavernsScene extends Phaser.Scene {
       return
     }
 
+    const body = this.player.body as Phaser.Physics.Arcade.Body
+    this.setPlayerSquatting(this.cursors.down.isDown && body.blocked.down)
+    const actionPressed = Phaser.Input.Keyboard.JustDown(this.spaceKey)
+    const shopBought = this.pipeShop.update(this.isSquatting, actionPressed)
+    const squatSpeedMul = this.isSquatting ? 0.45 : 1
+
     if (this.cursors.left.isDown) {
-      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(-this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = -1
     } else if (this.cursors.right.isDown) {
-      this.player.setAccelerationX(this.effectiveStats.moveAcceleration)
+      this.player.setAccelerationX(this.effectiveStats.moveAcceleration * squatSpeedMul)
       this.facingDir = 1
     } else {
       this.player.setAccelerationX(0)
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+    if (!shopBought && actionPressed) {
       this.fireShot()
     }
     if (Phaser.Input.Keyboard.JustDown(this.abilityKey)) {
       this.tryUseHeroAbility()
     }
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body
-    if (this.cursors.up.isDown && body.blocked.down) {
+    if (this.cursors.up.isDown && body.blocked.down && !this.isSquatting) {
       this.player.setVelocityY(-this.effectiveStats.jumpVelocity)
     }
 
@@ -334,6 +347,49 @@ export class RockyCavernsScene extends Phaser.Scene {
     }
 
     gfx.destroy()
+  }
+
+  private createPipeShop(): void {
+    this.pipeShop = new PipeShop(this, {
+      stageKey: 'rocky-caverns',
+      roomTitle: 'Cavern Pipe Room',
+      player: this.player,
+      pipeX: 1560,
+      pipeY: 824,
+      roomX: 420,
+      roomY: 260,
+      unlockMessage: 'Cavern pipe revealed! Squat on it to enter.',
+      returnMessage: 'Back from the cavern pipe room.',
+      isUnlocked: () => !this.enemy1.active && !this.enemy2.active,
+      setStatus: (message) => {
+        this.statusMessage = message
+      },
+      updateUi: () => this.updateUiText(),
+      heal: (amount) => {
+        this.playerHealth = Math.min(this.playerMaxHealth, this.playerHealth + amount)
+      },
+      boostPower: () => {
+        this.shotCooldownScale = Math.min(this.shotCooldownScale, 0.75)
+        this.abilityCooldownScale = Math.min(this.abilityCooldownScale, 0.75)
+        this.abilityPowerScale = Math.max(this.abilityPowerScale, 1.45)
+      },
+      boostSpeed: () => {
+        this.speedBoostActive = true
+        this.effectiveStats = {
+          ...this.effectiveStats,
+          moveAcceleration: this.effectiveStats.moveAcceleration + 90,
+          maxVelocityX: this.effectiveStats.maxVelocityX + 45,
+        }
+        this.player.setMaxVelocity(this.effectiveStats.maxVelocityX, 900)
+      },
+      boostDefense: () => {
+        this.damageReductionMul = Math.min(this.damageReductionMul, 0.72)
+      },
+      addLife: () => {
+        gameProgress.remainingLives = Math.min(5, gameProgress.remainingLives + 1)
+      },
+      playTone: (freq, durationSec) => this.playTone(freq, durationSec),
+    })
   }
 
   private buildLevelGeometry(): void {
@@ -1107,6 +1163,20 @@ export class RockyCavernsScene extends Phaser.Scene {
     this.updateUiText()
   }
 
+  private setPlayerSquatting(shouldSquat: boolean): void {
+    if (this.isSquatting === shouldSquat) {
+      return
+    }
+    this.isSquatting = shouldSquat
+    if (shouldSquat) {
+      this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight * 0.58)
+      this.player.setTint(0xd8f7ff)
+    } else {
+      this.player.setDisplaySize(this.normalPlayerDisplayWidth, this.normalPlayerDisplayHeight)
+      this.player.clearTint()
+    }
+  }
+
   private updateUiText(): void {
     const hp = `${Math.ceil(this.playerHealth)}/${this.playerMaxHealth}`
     this.uiText.setText(
@@ -1116,6 +1186,7 @@ export class RockyCavernsScene extends Phaser.Scene {
         `Hero: ${this.selectedHero?.displayName ?? 'Micralis'}`,
         `Special (X): ${this.selectedHero.moves.special.name}`,
         `HP: ${hp}`,
+        `Coins: ${gameProgress.coins}`,
         `Volcano Man: ${this.rescueDone ? 'Rescued' : 'Missing'}`,
         `Cavern Map Piece: ${gameProgress.cavernMapPiece ? 'Yes' : 'No'}`,
         this.statusMessage,
